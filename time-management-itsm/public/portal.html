@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Service request</title>
+  <meta name="color-scheme" content="light dark">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="portal-body">
+  <main class="portal">
+    <div class="brand big"><span class="logo"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2"/></svg></span><span id="company">Service Desk</span></div>
+    <form class="card portal-card" id="pf" novalidate><div class="loading"><span class="spinner"></span></div></form>
+  </main>
+  <script>
+    (async () => {
+      const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+      const id = location.pathname.split('/').pop();
+      const form = document.getElementById('pf');
+      try { if (localStorage.getItem('tm-theme')) document.documentElement.dataset.theme = localStorage.getItem('tm-theme'); } catch {}
+      const res = await fetch(`/api/public/forms/${encodeURIComponent(id)}`);
+      if (!res.ok) { form.innerHTML = '<h2>Form not available</h2><p class="muted">This form is closed or the link is incorrect.</p>'; return; }
+      const f = await res.json();
+      document.title = `${f.name} · ${f.company}`;
+      document.getElementById('company').textContent = f.company;
+      const field = (x) => {
+        const req = x.required ? 'required' : ''; const lbl = `${esc(x.label)}${x.required ? ' <span class="req">*</span>' : ''}`;
+        if (x.type === 'textarea') return `<label class="span2">${lbl}<textarea name="${esc(x.key)}" rows="5" ${req}></textarea></label>`;
+        if (x.type === 'select') return `<label>${lbl}<select name="${esc(x.key)}" ${req}><option value="">Select…</option>${(x.options || []).map((o) => `<option>${esc(o)}</option>`).join('')}</select></label>`;
+        if (x.type === 'checkbox') return `<label class="check span2"><input type="checkbox" name="${esc(x.key)}"> ${lbl}</label>`;
+        return `<label>${lbl}<input type="${esc(x.type)}" name="${esc(x.key)}" ${req}></label>`;
+      };
+      form.innerHTML = `<h2>${esc(f.name)}</h2><p class="muted">${esc(f.description || '')}</p><div class="form-grid">${f.fields.map(field).join('')}</div>
+        <div class="login-err" id="err"></div><button class="btn primary" type="submit">Submit request</button>`;
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const body = {};
+        for (const el of form.elements) if (el.name) body[el.name] = el.type === 'checkbox' ? el.checked : el.value;
+        const r = await fetch(`/api/public/forms/${encodeURIComponent(id)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { document.getElementById('err').textContent = d.error || 'Submission failed'; return; }
+        form.innerHTML = `<div class="portal-done"><div class="big-check">✓</div><h2>Request received</h2><p>Your reference number is <b>${esc(d.number)}</b>.</p><p class="muted">Our team will contact you soon. Keep this number for follow-ups.</p><button class="btn" type="button" onclick="location.reload()">Submit another request</button></div>`;
+      });
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,470 @@
+/* Settings (gear icon): users, profiles, forms, email channels, workflows, general. */
+(() => {
+  const { esc, icon } = App;
+  const TABS = [
+    { id: 'users', label: 'Users', icon: 'users', perm: 'users' },
+    { id: 'profiles', label: 'Profiles & Permissions', icon: 'shield', perm: 'profiles' },
+    { id: 'forms', label: 'Forms', icon: 'form', perm: 'forms' },
+    { id: 'email', label: 'Email (Inbound / Outbound)', icon: 'mail', perm: 'email' },
+    { id: 'workflows', label: 'Workflow Automation', icon: 'flow', perm: 'workflows' },
+    { id: 'general', label: 'General', icon: 'sliders', perm: 'settings' },
+    { id: 'audit', label: 'Audit log', icon: 'list', perm: 'settings' },
+  ];
+  const actionBtns = (mod, id) => `<td class="row-actions">${App.can(mod, 'edit') ? `<button class="icon-btn" data-edit="${id}" title="Edit">${icon('edit', 16)}</button>` : ''}${App.can(mod, 'delete') ? `<button class="icon-btn" data-del="${id}" title="Delete">${icon('trash', 16)}</button>` : ''}</td>`;
+  const bindRows = (el, list, onEdit, onDelete) => {
+    el.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => onEdit(list.find((x) => x.id === b.dataset.edit))));
+    el.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => onDelete(list.find((x) => x.id === b.dataset.del))));
+  };
+  const reload = async () => { await App.refreshMeta(); App.render(); };
+
+  // ================= USERS =================
+  async function usersTab(el) {
+    const [users, profiles] = await Promise.all([App.get('/api/users'), App.can('profiles') ? App.get('/api/profiles') : Promise.resolve(App.meta.profiles)]);
+    let q = '';
+    const draw = () => {
+      const list = users.filter((u) => `${u.name} ${u.username} ${u.email} ${u.department}`.toLowerCase().includes(q));
+      el.querySelector('#ulist').innerHTML = `<table class="table hover"><thead><tr><th>User</th><th>Username</th><th>Profile</th><th>Reporting manager</th><th>Department</th><th>Workload</th><th>Status</th><th></th></tr></thead>
+        <tbody>${list.map((u) => `<tr><td>${App.avatar(u, 30)} <b>${esc(u.name)}</b><small class="muted">${esc(u.email || '')}</small></td><td><code>${esc(u.username)}</code></td>
+          <td><span class="pill" style="--pc:${esc(u.profileColor || '#64748b')}" data-color>${esc(u.profileName)}</span></td><td>${esc(u.managerName || '—')}</td><td>${esc(u.department || '')}<small class="muted">${esc(u.designation || '')}</small></td>
+          <td>${App.light(u)}</td><td>${u.active ? (u.online ? '<span class="ok">● Online</span>' : `<span class="muted">Last seen ${App.ago(u.lastSeen)}</span>`) : '<span class="pill st-closed">Disabled</span>'}</td>${actionBtns('users', u.id)}</tr>`).join('')}</tbody></table>`;
+      bindRows(el, users, userModal, delUser);
+    };
+    function userModal(u = {}) {
+      App.modal({
+        title: u.id ? `Edit user – ${u.name}` : 'Create user',
+        wide: true,
+        body: `<div class="form-grid">
+          <label>Full name<input name="name" value="${esc(u.name || '')}" required></label>
+          <label>Username<input name="username" value="${esc(u.username || '')}" required autocomplete="off"></label>
+          <label>Email<input type="email" name="email" value="${esc(u.email || '')}"></label>
+          <label>Phone<input name="phone" value="${esc(u.phone || '')}"></label>
+          <label>Department<input name="department" value="${esc(u.department || '')}"></label>
+          <label>Designation<input name="designation" value="${esc(u.designation || '')}"></label>
+          <label>Profile (role)<select name="profileId" required>${App.options(profiles.map((p) => ({ value: p.id, label: p.name })), u.profileId, { blank: 'Select profile…' })}</select></label>
+          <label>Reporting manager<select name="managerId">${App.options(users.filter((x) => x.id !== u.id).map((x) => ({ value: x.id, label: `${x.name}${x.designation ? ` – ${x.designation}` : ''}` })), u.managerId, { blank: '— None —' })}</select></label>
+          <label>${u.id ? 'Reset password <small class="muted">(leave blank to keep)</small>' : 'Password'}<input type="password" name="password" autocomplete="new-password" ${u.id ? '' : 'required'}></label>
+          <div class="checks"><label class="check"><input type="checkbox" name="active" ${u.active !== false ? 'checked' : ''}> Active (can sign in)</label>
+          <label class="check"><input type="checkbox" name="mustChangePassword"> Must change password at next sign-in</label></div>
+        </div>`,
+        onSubmit: async (f) => {
+          if (u.id) await App.put(`/api/users/${u.id}`, f); else await App.post('/api/users', f);
+          App.toast(u.id ? 'User updated' : 'User created');
+          reload();
+        },
+      });
+    }
+    async function delUser(u) {
+      if (!await App.confirm('Delete user', `Delete ${u.name}? Their open tickets become unassigned and their reportees move to their manager. Logged time is kept.`)) return;
+      try { await App.del(`/api/users/${u.id}`); App.toast('User deleted'); reload(); } catch (e) { App.fail(e); }
+    }
+    el.innerHTML = `<div class="toolbar"><div class="search">${icon('search', 16)}<input id="uq" placeholder="Search users…"></div><span class="muted">${users.length} users · ${users.filter((u) => u.online).length} online</span><span class="grow"></span>
+      ${App.can('users', 'create') ? `<button class="btn primary" id="new">${icon('plus', 16)} Create user</button>` : ''}</div>
+      <div class="card"><div class="table-wrap" id="ulist"></div></div>`;
+    el.querySelector('#uq').addEventListener('input', (e) => { q = e.target.value.toLowerCase(); draw(); });
+    el.querySelector('#new')?.addEventListener('click', () => userModal());
+    draw();
+  }
+
+  // ================= PROFILES =================
+  async function profilesTab(el) {
+    const profiles = await App.get('/api/profiles');
+    const mods = App.meta.modules;
+    const ACT_LABEL = { view: 'View', create: 'Create', edit: 'Modify', delete: 'Delete', viewAll: 'See everyone', assign: 'Assign' };
+    function profileModal(p = {}, clone = false) {
+      const perms = p.permissions || {};
+      const locked = p.system && !clone;
+      App.modal({
+        title: clone ? `Clone profile – ${p.name}` : p.id ? `Edit profile – ${p.name}` : 'Create custom profile',
+        wide: true,
+        body: `<div class="form-grid"><label>Profile name<input name="name" value="${esc(clone ? `${p.name} (copy)` : p.name || '')}" required></label>
+          <label>Colour<input type="color" name="color" value="${esc(p.color || '#64748b')}"></label>
+          <label class="span2">Description<input name="description" value="${esc(p.description || '')}"></label></div>
+          ${locked ? '<p class="notice">The Administrator profile always has full access.</p>' : ''}
+          <div class="table-wrap"><table class="table perm-table"><thead><tr><th>Module</th>${Object.keys(ACT_LABEL).map((a) => `<th>${ACT_LABEL[a]}</th>`).join('')}<th>All</th></tr></thead><tbody>
+          ${Object.entries(mods).map(([k, m]) => `<tr><td><b>${esc(m.label)}</b></td>${Object.keys(ACT_LABEL).map((a) => `<td>${m.actions.includes(a) ? `<input type="checkbox" data-mod="${k}" data-act="${a}" ${(perms[k] || []).includes(a) ? 'checked' : ''} ${locked ? 'disabled' : ''}>` : ''}</td>`).join('')}
+            <td><input type="checkbox" data-row="${k}" ${locked ? 'disabled' : ''}></td></tr>`).join('')}
+          </tbody></table></div>
+          <p class="hint">“See everyone” lets a profile view all engineers’ tracker entries / all tickets. Without it users see their own data plus their direct and indirect reportees.</p>`,
+        onOpen: (form) => {
+          form.querySelectorAll('[data-row]').forEach((r) => {
+            const boxes = form.querySelectorAll(`[data-mod="${r.dataset.row}"]`);
+            r.checked = [...boxes].every((b) => b.checked);
+            r.addEventListener('change', () => boxes.forEach((b) => { b.checked = r.checked; }));
+          });
+        },
+        onSubmit: async (f, form) => {
+          const permissions = {};
+          form.querySelectorAll('[data-mod]').forEach((b) => { if (b.checked) (permissions[b.dataset.mod] = permissions[b.dataset.mod] || []).push(b.dataset.act); });
+          const body = { name: f.name, description: f.description, color: f.color, permissions };
+          if (p.id && !clone) await App.put(`/api/profiles/${p.id}`, body); else await App.post('/api/profiles', body);
+          App.toast('Profile saved');
+          reload();
+        },
+      });
+    }
+    el.innerHTML = `<div class="toolbar"><p class="muted">Profiles define what users can see and do. Create custom profiles and assign them to users.</p><span class="grow"></span>
+      ${App.can('profiles', 'create') ? `<button class="btn primary" id="new">${icon('plus', 16)} Create profile</button>` : ''}</div>
+      <div class="profile-grid">${profiles.map((p) => `<article class="card profile" style="--pc:${esc(p.color || '#64748b')}">
+        <div class="pf-top"><span class="pf-dot"></span><h3>${esc(p.name)}</h3>${p.system ? '<span class="tag ghost">system</span>' : ''}<span class="grow"></span>
+          ${App.can('profiles', 'create') ? `<button class="icon-btn" data-clone="${p.id}" title="Clone">${icon('copy', 16)}</button>` : ''}
+          ${App.can('profiles', 'edit') ? `<button class="icon-btn" data-edit="${p.id}" title="Edit">${icon('edit', 16)}</button>` : ''}
+          ${App.can('profiles', 'delete') && !p.system ? `<button class="icon-btn" data-del="${p.id}" title="Delete">${icon('trash', 16)}</button>` : ''}</div>
+        <p class="muted">${esc(p.description || '')}</p>
+        <div class="pf-mods">${Object.entries(p.permissions || {}).map(([k, a]) => `<span class="tag ghost" title="${esc(a.join(', '))}">${esc(mods[k]?.label || k)}</span>`).join('') || '<span class="muted">No access</span>'}</div>
+        <small class="muted">${p.userCount} user(s)</small></article>`).join('')}</div>`;
+    el.querySelector('#new')?.addEventListener('click', () => profileModal());
+    el.querySelectorAll('[data-clone]').forEach((b) => b.addEventListener('click', () => profileModal(profiles.find((p) => p.id === b.dataset.clone), true)));
+    bindRows(el, profiles, (p) => profileModal(p), async (p) => {
+      if (!await App.confirm('Delete profile', `Delete profile “${p.name}”?`)) return;
+      try { await App.del(`/api/profiles/${p.id}`); App.toast('Profile deleted'); reload(); } catch (e) { App.fail(e); }
+    });
+  }
+
+  // ================= FORMS =================
+  async function formsTab(el) {
+    const forms = await App.get('/api/forms');
+    const s = App.meta.settings;
+    const FIELD_TYPES = ['text', 'email', 'textarea', 'select', 'number', 'date', 'checkbox'];
+    const fieldRow = (f = {}) => `<div class="builder-row" draggable="false">
+      <input data-k="label" placeholder="Field label" value="${esc(f.label || '')}">
+      <select data-k="type">${App.options(FIELD_TYPES, f.type || 'text')}</select>
+      <input data-k="options" placeholder="Options (comma separated, for select)" value="${esc((f.options || []).join(', '))}">
+      <label class="check"><input type="checkbox" data-k="required" ${f.required ? 'checked' : ''}> Required</label>
+      <input type="hidden" data-k="key" value="${esc(f.key || '')}">
+      <button type="button" class="icon-btn" data-up title="Move up">▲</button><button type="button" class="icon-btn" data-rm title="Remove">${icon('x', 15)}</button></div>`;
+    function formModal(fm = { fields: [{ label: 'Subject', key: 'subject', type: 'text', required: true }, { label: 'Your email', key: 'email', type: 'email', required: true }, { label: 'Description', key: 'description', type: 'textarea', required: true }] }) {
+      App.modal({
+        title: fm.id ? `Edit form – ${fm.name}` : 'Create form',
+        wide: true,
+        body: `<div class="form-grid">
+          <label>Form name<input name="name" value="${esc(fm.name || '')}" required></label>
+          <label>Ticket category<select name="category">${App.options(s.ticketCategories, fm.category)}</select></label>
+          <label class="span2">Description<input name="description" value="${esc(fm.description || '')}"></label>
+          <label>Default priority<select name="defaultPriority">${App.options(s.ticketPriorities, fm.defaultPriority || 'Medium')}</select></label>
+          <label>Link to project<select name="projectId">${App.projectOptions(fm.projectId)}</select></label>
+          <label>Default assignee${App.userPicker('defaultAssigneeId', fm.defaultAssigneeId, { placeholder: 'Leave to workflows' })}</label>
+          <div class="checks"><label class="check"><input type="checkbox" name="active" ${fm.active !== false ? 'checked' : ''}> Active</label>
+          <label class="check"><input type="checkbox" name="public" ${fm.public !== false ? 'checked' : ''}> Public self-service portal link (no login)</label></div>
+        </div>
+        <h4>Fields <small class="muted">Use keys “subject”, “name”, “email” to map to the ticket subject and requester.</small></h4>
+        <div id="fields">${fm.fields.map(fieldRow).join('')}</div>
+        <button type="button" class="btn sm" id="addf">${icon('plus', 15)} Add field</button>`,
+        onOpen: (form) => {
+          const box = form.querySelector('#fields');
+          const wire = () => {
+            box.querySelectorAll('[data-rm]').forEach((b) => { b.onclick = () => b.closest('.builder-row').remove(); });
+            box.querySelectorAll('[data-up]').forEach((b) => { b.onclick = () => { const r = b.closest('.builder-row'); if (r.previousElementSibling) box.insertBefore(r, r.previousElementSibling); }; });
+          };
+          form.querySelector('#addf').addEventListener('click', () => { box.insertAdjacentHTML('beforeend', fieldRow()); wire(); });
+          wire();
+        },
+        onSubmit: async (f, form) => {
+          const fields = [...form.querySelectorAll('.builder-row')].map((r) => {
+            const o = {}; r.querySelectorAll('[data-k]').forEach((i) => { o[i.dataset.k] = i.type === 'checkbox' ? i.checked : i.value; });
+            return o;
+          }).filter((x) => x.label);
+          if (!fields.length) throw new Error('Add at least one field');
+          const body = { ...f, fields, defaultAssigneeId: f.defaultAssigneeId || null, projectId: f.projectId || null };
+          if (fm.id) await App.put(`/api/forms/${fm.id}`, body); else await App.post('/api/forms', body);
+          App.toast('Form saved');
+          reload();
+        },
+      });
+    }
+    const link = (f) => `${location.origin}/portal/${f.id}`;
+    el.innerHTML = `<div class="toolbar"><p class="muted">Forms create tickets automatically — internally from “New ticket”, or publicly via a self-service portal link you can share with customers.</p><span class="grow"></span>
+      ${App.can('forms', 'create') ? `<button class="btn primary" id="new">${icon('plus', 16)} Create form</button>` : ''}</div>
+      <div class="card"><div class="table-wrap"><table class="table"><thead><tr><th>Form</th><th>Fields</th><th>Category / priority</th><th>Submissions</th><th>Portal link</th><th>Status</th><th></th></tr></thead><tbody>
+      ${forms.map((f) => `<tr><td><b>${esc(f.name)}</b><small class="muted">${esc(f.description || '')}</small></td><td>${f.fields.length}</td><td>${esc(f.category || '')} · ${esc(f.defaultPriority || '')}</td><td>${f.submissions}</td>
+        <td>${f.public ? `<button class="btn sm ghost" data-copy="${esc(link(f))}">${icon('copy', 14)} Copy</button> <a class="btn sm ghost" target="_blank" rel="noopener" href="${esc(link(f))}">${icon('link', 14)} Open</a>` : '<span class="muted">internal only</span>'}</td>
+        <td>${f.active ? '<span class="pill st-resolved">Active</span>' : '<span class="pill st-closed">Inactive</span>'}</td>${actionBtns('forms', f.id)}</tr>`).join('') || `<tr><td colspan="7">${App.empty('No forms yet')}</td></tr>`}
+      </tbody></table></div></div>`;
+    el.querySelector('#new')?.addEventListener('click', () => formModal());
+    el.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(b.dataset.copy); App.toast('Portal link copied'); } catch { App.toast(b.dataset.copy); }
+    }));
+    bindRows(el, forms, formModal, async (f) => {
+      if (!await App.confirm('Delete form', `Delete “${f.name}”? Existing tickets are kept.`)) return;
+      try { await App.del(`/api/forms/${f.id}`); App.toast('Form deleted'); reload(); } catch (e) { App.fail(e); }
+    });
+  }
+
+  // ================= EMAIL =================
+  async function emailTab(el) {
+    const { accounts, log } = await App.get('/api/email-accounts');
+    const providers = App.meta.emailProviders;
+    function accModal(a = { direction: 'inbound', provider: 'm365', enabled: true }) {
+      const preset = (dir, prov) => (providers[prov] || providers.custom)[dir === 'inbound' ? 'imap' : 'smtp'] || providers.custom[dir === 'inbound' ? 'imap' : 'smtp'];
+      const p0 = a.id ? a : { ...a, ...preset(a.direction, a.provider), folder: 'INBOX', pollMinutes: 5 };
+      App.modal({
+        title: a.id ? `Edit channel – ${a.name}` : 'Add email channel',
+        wide: true,
+        body: `<div class="form-grid">
+          <label>Channel name<input name="name" value="${esc(p0.name || '')}" placeholder="e.g. Service desk mailbox" required></label>
+          <label>Direction<select name="direction">${App.options([{ value: 'inbound', label: 'Inbound – email to ticket (IMAP)' }, { value: 'outbound', label: 'Outbound – notifications (SMTP)' }], p0.direction)}</select></label>
+          <label class="span2">Email solution<select name="provider">${App.options(Object.entries(providers).map(([k, v]) => ({ value: k, label: v.label })), p0.provider)}</select></label>
+          <label>Server host<input name="host" value="${esc(p0.host || '')}" required></label>
+          <label>Port<input type="number" name="port" value="${esc(p0.port || '')}" required></label>
+          <label>Authentication<select name="authType">${App.options([{ value: 'password', label: 'Username + password / app password' }, { value: 'oauth2', label: 'OAuth2 access token' }], p0.authType || 'password')}</select></label>
+          <label>Username / mailbox<input name="username" value="${esc(p0.username || '')}" autocomplete="off"></label>
+          <label>Password / token<input type="password" name="password" value="${esc(p0.password || '')}" autocomplete="new-password"></label>
+          <div class="checks"><label class="check"><input type="checkbox" name="secure" ${p0.secure ? 'checked' : ''}> Use SSL/TLS (implicit)</label>
+          <label class="check"><input type="checkbox" name="allowSelfSigned" ${p0.allowSelfSigned ? 'checked' : ''}> Allow self-signed certificate (on-premises)</label></div>
+          <div class="span2 grid2" data-dir="outbound">
+            <label>From name<input name="fromName" value="${esc(p0.fromName || '')}" placeholder="IT Service Desk"></label>
+            <label>From address<input type="email" name="fromAddress" value="${esc(p0.fromAddress || '')}" placeholder="servicedesk@company.com"></label>
+            <label class="check"><input type="checkbox" name="isDefault" ${p0.isDefault ? 'checked' : ''}> Default outbound channel</label>
+          </div>
+          <div class="span2 grid2" data-dir="inbound">
+            <label>Mailbox folder<input name="folder" value="${esc(p0.folder || 'INBOX')}"></label>
+            <label>Check every (minutes)<input type="number" min="1" name="pollMinutes" value="${esc(p0.pollMinutes || 5)}"></label>
+            <label>Apply form (category / priority)<select name="defaultFormId">${App.options(App.meta.forms.map((f) => ({ value: f.id, label: f.name })), p0.defaultFormId, { blank: '— None —' })}</select></label>
+            <label>Default assignee${App.userPicker('defaultAssigneeId', p0.defaultAssigneeId, { placeholder: 'Leave to workflows' })}</label>
+          </div>
+          <label class="check span2"><input type="checkbox" name="enabled" ${p0.enabled !== false ? 'checked' : ''}> Enabled</label>
+        </div>
+        <p class="hint">Works with any cloud (Microsoft 365, Google Workspace, Zoho, Amazon SES, SendGrid…) or on-premises (Exchange Server, Postfix/Dovecot, hMailServer…) system over SMTP / IMAP. Replies containing <code>[${esc(App.meta.settings.ticketPrefix)}-1234]</code> in the subject are added to the existing ticket.</p>`,
+        onOpen: (form) => {
+          const sync = () => form.querySelectorAll('[data-dir]').forEach((d) => { d.hidden = d.dataset.dir !== form.direction.value; });
+          const applyPreset = () => {
+            const p = preset(form.direction.value, form.provider.value);
+            form.host.value = p.host; form.port.value = p.port; form.secure.checked = !!p.secure;
+          };
+          form.direction.addEventListener('change', () => { sync(); applyPreset(); });
+          form.provider.addEventListener('change', applyPreset);
+          sync();
+        },
+        onSubmit: async (f) => {
+          f.port = Number(f.port); f.pollMinutes = Number(f.pollMinutes) || 5;
+          if (!f.defaultFormId) f.defaultFormId = null;
+          if (!f.defaultAssigneeId) f.defaultAssigneeId = null;
+          if (a.id) await App.put(`/api/email-accounts/${a.id}`, f); else await App.post('/api/email-accounts', f);
+          App.toast('Email channel saved');
+          App.render();
+        },
+      });
+    }
+    const section = (dir, title, desc) => {
+      const list = accounts.filter((a) => a.direction === dir);
+      return `<section class="card"><header><h3>${icon(dir === 'inbound' ? 'mail' : 'right', 16)} ${title}</h3><span class="w-sub">${desc}</span></header>
+        ${list.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Channel</th><th>Solution</th><th>Server</th><th>${dir === 'inbound' ? 'Last checked' : 'From'}</th><th>Status</th><th>Actions</th><th></th></tr></thead><tbody>
+        ${list.map((a) => `<tr><td><b>${esc(a.name)}</b>${a.isDefault ? ' <span class="tag ghost">default</span>' : ''}<small class="muted">${esc(a.username || '')}</small></td><td>${esc(providers[a.provider]?.label || a.provider)}</td><td><code>${esc(a.host)}:${esc(a.port)}</code></td>
+          <td>${dir === 'inbound' ? `${App.ago(a.lastPolledAt)}${a.lastError ? `<small class="bad">${esc(a.lastError)}</small>` : ''}` : esc(a.fromAddress || a.username || '')}</td>
+          <td>${a.enabled ? '<span class="pill st-resolved">Enabled</span>' : '<span class="pill st-closed">Disabled</span>'}</td>
+          <td class="nowrap">${App.can('email', 'edit') ? `<button class="btn sm ghost" data-test="${a.id}">Test</button>${dir === 'inbound' ? `<button class="btn sm ghost" data-poll="${a.id}">Fetch now</button>` : `<button class="btn sm ghost" data-send="${a.id}">Send test</button>`}` : ''}</td>${actionBtns('email', a.id)}</tr>`).join('')}
+        </tbody></table></div>` : `<p class="muted pad">No ${dir} channels configured.</p>`}</section>`;
+    };
+    el.innerHTML = `<div class="toolbar"><p class="muted">Connect any cloud or on-premises email system. Inbound mailboxes turn emails into tickets; outbound sends notifications.</p><span class="grow"></span>
+      ${App.can('email', 'create') ? `<button class="btn primary" id="new">${icon('plus', 16)} Add email channel</button>` : ''}</div>
+      ${section('inbound', 'Inbound (email → ticket)', 'IMAP')}
+      ${section('outbound', 'Outbound (notifications)', 'SMTP')}
+      <section class="card"><header><h3>Email activity log</h3></header>${log.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>When</th><th>Direction</th><th>Channel</th><th>To / subject</th><th>Status</th></tr></thead><tbody>
+        ${log.map((l) => `<tr><td>${App.fmtDateTime(l.at)}</td><td>${l.direction === 'in' ? 'Inbound' : 'Outbound'}</td><td>${esc(l.account || '—')}</td><td>${esc(l.to || '')}<small class="muted">${esc(l.subject || l.detail || '')}</small></td><td><span class="pill ${l.status === 'sent' || l.status === 'polled' ? 'st-resolved' : l.status === 'failed' ? 'prio-critical' : 'st-on-hold'}">${esc(l.status)}</span>${l.status !== 'polled' && l.detail ? `<small class="muted">${esc(l.detail)}</small>` : ''}</td></tr>`).join('')}
+      </tbody></table></div>` : '<p class="muted pad">No email activity yet.</p>'}</section>`;
+    el.querySelector('#new')?.addEventListener('click', () => accModal());
+    const run = (sel, path, body) => el.querySelectorAll(sel).forEach((b) => b.addEventListener('click', async () => {
+      b.disabled = true; const t = b.textContent; b.textContent = 'Working…';
+      try { const r = await App.post(`/api/email-accounts/${Object.values(b.dataset)[0]}/${path}`, body?.()); App.toast(r.message); App.render(); } catch (e) { App.fail(e); } finally { b.disabled = false; b.textContent = t; }
+    }));
+    run('[data-test]', 'test');
+    run('[data-poll]', 'poll');
+    run('[data-send]', 'send-test', () => ({ to: prompt('Send test email to:', App.me.email || '') || undefined }));
+    bindRows(el, accounts, accModal, async (a) => {
+      if (!await App.confirm('Delete email channel', `Delete “${a.name}”?`)) return;
+      try { await App.del(`/api/email-accounts/${a.id}`); App.toast('Channel deleted'); App.render(); } catch (e) { App.fail(e); }
+    });
+  }
+
+  // ================= WORKFLOWS =================
+  async function workflowsTab(el) {
+    const { workflows, logs } = await App.get('/api/workflows');
+    const wm = App.meta.workflowMeta;
+    const s = App.meta.settings;
+    const emailAccs = App.can('email') ? (await App.get('/api/email-accounts')).accounts.filter((a) => a.direction === 'inbound') : [];
+    const FIELDS = [['subject', 'Subject'], ['description', 'Description'], ['priority', 'Priority'], ['status', 'Status'], ['category', 'Category'], ['source', 'Source (web/email/form/portal/automation)'], ['requesterEmail', 'Requester email'], ['assigneeId', 'Assignee'], ['projectId', 'Project'], ['formId', 'Form']];
+    const condRow = (c = {}) => `<div class="builder-row cond">
+      <select data-k="field">${App.options(FIELDS.map(([v, l]) => ({ value: v, label: l })), c.field)}<option value="${c.field?.startsWith('formData.') ? esc(c.field) : 'formData.'}" ${c.field?.startsWith('formData.') ? 'selected' : ''}>Form field…</option></select>
+      <select data-k="op">${App.options(Object.entries(wm.operators).map(([v, l]) => ({ value: v, label: l })), c.op || 'equals')}</select>
+      <input data-k="value" value="${esc(c.value || '')}" placeholder="Value (comma = any of)">
+      <button type="button" class="icon-btn" data-rm>${icon('x', 15)}</button></div>`;
+    const userMulti = (sel = []) => `<div class="multi">${App.meta.users.map((u) => `<label class="check"><input type="checkbox" data-multi="userIds" value="${u.id}" ${sel.includes(u.id) ? 'checked' : ''}> ${esc(u.name)} ${App.light(u)}</label>`).join('')}</div>`;
+    const actionParams = (a) => {
+      switch (a.type) {
+        case 'assign_user': return `<label>User${App.userPicker('userId', a.userId, { allowNone: false, placeholder: 'Pick a user' })}</label>`;
+        case 'assign_round_robin':
+        case 'assign_least_loaded': return `<label>Limit to profile<select data-k="profileId">${App.options(App.meta.profiles.map((p) => ({ value: p.id, label: p.name })), a.profileId, { blank: 'Any profile' })}</select></label>
+          <label class="check"><input type="checkbox" data-k="onlineOnly" ${a.onlineOnly ? 'checked' : ''}> Prefer online users</label><div class="span2"><small class="muted">Group (leave empty for everyone matching the profile):</small>${userMulti(a.userIds)}</div>`;
+        case 'set_priority': return `<label>Priority<select data-k="value">${App.options(s.ticketPriorities, a.value)}</select></label>`;
+        case 'set_status': return `<label>Status<select data-k="value">${App.options(s.ticketStatuses, a.value)}</select></label>`;
+        case 'set_category': return `<label>Category<select data-k="value">${App.options(s.ticketCategories, a.value)}</select></label>`;
+        case 'set_project': return `<label>Project<select data-k="projectId">${App.projectOptions(a.projectId, 'Select…')}</select></label>`;
+        case 'add_comment': return `<label class="span2">Text<textarea data-k="text" rows="2">${esc(a.text || '')}</textarea></label><label class="check"><input type="checkbox" data-k="internal" ${a.internal !== false ? 'checked' : ''}> Internal note</label>`;
+        case 'send_email': return `<label>Recipient<select data-k="to">${App.options([{ value: 'requester', label: 'Requester' }, { value: 'assignee', label: 'Assignee' }, { value: 'manager', label: 'Assignee’s reporting manager' }, { value: 'custom', label: 'Custom address' }], a.to || 'requester')}</select></label>
+          <label>Custom address<input data-k="address" value="${esc(a.address || '')}"></label><label class="span2">Subject<input data-k="subject" value="${esc(a.subject || '[{{ticket.number}}] {{ticket.subject}}')}"></label><label class="span2">Body<textarea data-k="body" rows="3">${esc(a.body || 'Ticket {{ticket.number}} – {{ticket.subject}}\nPriority: {{ticket.priority}}\nAssignee: {{assignee.name}}')}</textarea></label>`;
+        case 'create_ticket': return `<label class="span2">Subject<input data-k="subject" value="${esc(a.subject || '')}" placeholder="e.g. Weekly backup verification – {{date}}"></label>
+          <label class="span2">Description<textarea data-k="description" rows="2">${esc(a.description || '')}</textarea></label>
+          <label>Priority<select data-k="priority">${App.options(s.ticketPriorities, a.priority || 'Medium')}</select></label><label>Category<select data-k="category">${App.options(s.ticketCategories, a.category)}</select></label>
+          <label>Project<select data-k="projectId">${App.projectOptions(a.projectId)}</select></label><label>Assign to${App.userPicker('assigneeId', a.assigneeId)}</label>`;
+        default: return '';
+      }
+    };
+    const actionRow = (a = { type: 'assign_least_loaded' }) => `<div class="action-card"><div class="row"><span class="step-no"></span><select data-type>${App.options(Object.entries(wm.actions).map(([v, l]) => ({ value: v, label: l })), a.type)}</select><span class="grow"></span><button type="button" class="icon-btn" data-up title="Move up">▲</button><button type="button" class="icon-btn" data-rm>${icon('x', 15)}</button></div><div class="form-grid params">${actionParams(a)}</div></div>`;
+    const readAction = (card) => {
+      const a = { type: card.querySelector('[data-type]').value };
+      card.querySelectorAll('.params [data-k]').forEach((i) => { a[i.dataset.k] = i.type === 'checkbox' ? i.checked : i.value; });
+      card.querySelectorAll('.params input[type=hidden][name]').forEach((i) => { a[i.name] = i.value; });
+      const multi = [...card.querySelectorAll('[data-multi=userIds]:checked')].map((i) => i.value);
+      if (card.querySelector('[data-multi]')) a.userIds = multi;
+      return a;
+    };
+
+    function wfModal(w = { trigger: 'ticket.created', matchType: 'all', conditions: [], actions: [{ type: 'assign_least_loaded', onlineOnly: true }], enabled: true, schedule: { frequency: 'daily', time: '09:00', weekdays: [1, 2, 3, 4, 5] } }) {
+      const sc = w.schedule || { frequency: 'daily', time: '09:00', weekdays: [1, 2, 3, 4, 5] };
+      App.modal({
+        title: w.id ? `Edit workflow – ${w.name}` : 'Create workflow',
+        wide: true,
+        body: `<div class="form-grid">
+          <label>Workflow name<input name="name" value="${esc(w.name || '')}" required></label>
+          <label>Run order<input type="number" name="order" value="${esc(w.order || workflows.length + 1)}"></label>
+          <label class="span2">Description<input name="description" value="${esc(w.description || '')}"></label>
+          <label class="span2">When (trigger)<select name="trigger">${App.options(Object.entries(wm.triggers).map(([v, l]) => ({ value: v, label: l })), w.trigger)}</select></label>
+          <label data-t="ticket.created ticket.updated form.submitted">Only for form<select name="formId">${App.options(App.meta.forms.map((f) => ({ value: f.id, label: f.name })), w.formId, { blank: 'Any form / none' })}</select></label>
+          <label data-t="email.received">Only for mailbox<select name="emailAccountId">${App.options(emailAccs.map((a) => ({ value: a.id, label: a.name })), w.emailAccountId, { blank: 'Any inbound mailbox' })}</select></label>
+          <div class="span2 grid2" data-t="schedule">
+            <label>Frequency<select name="frequency">${App.options([{ value: 'hourly', label: 'Every hour' }, { value: 'daily', label: 'Daily' }, { value: 'weekly', label: 'Weekly' }, { value: 'monthly', label: 'Monthly' }], sc.frequency)}</select></label>
+            <label>Time<input type="time" name="time" value="${esc(sc.time || '09:00')}"></label>
+            <label>Weekday (weekly)<select name="weekday">${App.options(['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d, i) => ({ value: i, label: d })), sc.weekday ?? 1)}</select></label>
+            <label>Day of month (monthly)<input type="number" min="1" max="28" name="monthDay" value="${esc(sc.monthDay || 1)}"></label>
+            <div class="span2"><small class="muted">Daily on:</small> ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d, i) => `<label class="check inline"><input type="checkbox" data-wd value="${i}" ${(sc.weekdays || []).map(Number).includes(i) ? 'checked' : ''}> ${d}</label>`).join('')}</div>
+          </div>
+        </div>
+        <div data-t="ticket.created ticket.updated form.submitted email.received">
+          <h4>If (conditions) <select name="matchType" class="inline-select">${App.options([{ value: 'all', label: 'all conditions match' }, { value: 'any', label: 'any condition matches' }], w.matchType)}</select></h4>
+          <div id="conds">${(w.conditions || []).map(condRow).join('')}</div>
+          <button type="button" class="btn sm" id="addc">${icon('plus', 15)} Add condition</button> <small class="muted">No conditions = always run.</small>
+        </div>
+        <h4>Then (actions run in order)</h4>
+        <div id="acts">${(w.actions || []).map(actionRow).join('')}</div>
+        <button type="button" class="btn sm" id="adda">${icon('plus', 15)} Add action</button>
+        <p class="hint">Placeholders: <code>{{ticket.number}}</code> <code>{{ticket.subject}}</code> <code>{{ticket.priority}}</code> <code>{{ticket.requesterName}}</code> <code>{{assignee.name}}</code> <code>{{date}}</code></p>
+        <label class="check"><input type="checkbox" name="enabled" ${w.enabled !== false ? 'checked' : ''}> Enabled</label>`,
+        onOpen: (form) => {
+          const syncT = () => form.querySelectorAll('[data-t]').forEach((x) => { x.hidden = !x.dataset.t.split(' ').includes(form.trigger.value); });
+          form.trigger.addEventListener('change', syncT); syncT();
+          const conds = form.querySelector('#conds'); const acts = form.querySelector('#acts');
+          const wire = () => {
+            form.querySelectorAll('[data-rm]').forEach((b) => { b.onclick = () => { b.closest('.builder-row, .action-card').remove(); }; });
+            acts.querySelectorAll('[data-up]').forEach((b) => { b.onclick = () => { const c = b.closest('.action-card'); if (c.previousElementSibling) acts.insertBefore(c, c.previousElementSibling); }; });
+            acts.querySelectorAll('[data-type]').forEach((sel) => {
+              sel.onchange = () => { sel.closest('.action-card').querySelector('.params').innerHTML = actionParams({ type: sel.value }); App.enhance(acts); };
+            });
+            conds.querySelectorAll('[data-k=field]').forEach((sel) => {
+              sel.onchange = () => {
+                if (sel.value === 'formData.') {
+                  const k = prompt('Form field key (e.g. impact):');
+                  if (k) { const o = sel.selectedOptions[0]; o.value = `formData.${k}`; o.textContent = `Form field: ${k}`; }
+                }
+              };
+            });
+            App.enhance(form);
+          };
+          form.querySelector('#addc').addEventListener('click', () => { conds.insertAdjacentHTML('beforeend', condRow({})); wire(); });
+          form.querySelector('#adda').addEventListener('click', () => { acts.insertAdjacentHTML('beforeend', actionRow()); wire(); });
+          wire();
+        },
+        onSubmit: async (f, form) => {
+          const conditions = [...form.querySelectorAll('#conds .builder-row')].map((r) => {
+            const o = {}; r.querySelectorAll('[data-k]').forEach((i) => { o[i.dataset.k] = i.value; }); return o;
+          });
+          const actions = [...form.querySelectorAll('#acts .action-card')].map(readAction);
+          if (!actions.length) throw new Error('Add at least one action');
+          const body = {
+            name: f.name, description: f.description, trigger: f.trigger, enabled: f.enabled, order: Number(f.order) || 0,
+            formId: f.formId || null, emailAccountId: f.emailAccountId || null, matchType: f.matchType, conditions, actions,
+            schedule: { frequency: f.frequency, time: f.time, weekday: Number(f.weekday), monthDay: Number(f.monthDay), weekdays: [...form.querySelectorAll('[data-wd]:checked')].map((i) => Number(i.value)) },
+          };
+          if (w.id) await App.put(`/api/workflows/${w.id}`, body); else await App.post('/api/workflows', body);
+          App.toast('Workflow saved');
+          App.render();
+        },
+      });
+    }
+
+    const describe = (w) => {
+      const sc = w.schedule || {};
+      const when = w.trigger === 'schedule' ? `${sc.frequency} ${sc.frequency === 'hourly' ? '' : `at ${sc.time}`}` : wm.triggers[w.trigger];
+      return `<b>When</b> ${esc(when)}${w.conditions?.length ? ` <b>if</b> ${w.conditions.map((c) => `${esc(c.field)} ${esc(wm.operators[c.op] || c.op)} “${esc(c.value)}”`).join(w.matchType === 'any' ? ' <i>or</i> ' : ' <i>and</i> ')}` : ''} <b>then</b> ${(w.actions || []).map((a) => esc(wm.actions[a.type] || a.type).toLowerCase()).join(' → ')}`;
+    };
+    el.innerHTML = `<div class="toolbar"><p class="muted">Build your own workflows: route tickets from specific forms or mailboxes, auto-assign by workload, notify managers, and create tickets on a schedule.</p><span class="grow"></span>
+      ${App.can('workflows', 'create') ? `<button class="btn primary" id="new">${icon('plus', 16)} Create workflow</button>` : ''}</div>
+      <div class="wf-list">${workflows.sort((a, b) => (a.order || 0) - (b.order || 0)).map((w) => `<article class="card wf ${w.enabled ? '' : 'off'}">
+        <div class="wf-ic">${icon(w.trigger === 'schedule' ? 'clock' : w.trigger === 'email.received' ? 'mail' : w.trigger === 'form.submitted' ? 'form' : 'flow', 20)}</div>
+        <div class="wf-main"><h3>${esc(w.name)} ${w.enabled ? '' : '<span class="tag ghost">disabled</span>'}</h3><p class="muted">${esc(w.description || '')}</p><p class="wf-desc">${describe(w)}</p>
+          <small class="muted">Ran ${w.runCount || 0} time(s) · last ${App.ago(w.lastRunAt)}</small></div>
+        <div class="wf-act">${App.can('workflows', 'edit') ? `<label class="switch" title="Enable / disable"><input type="checkbox" data-toggle="${w.id}" ${w.enabled ? 'checked' : ''}><i></i></label>${w.trigger === 'schedule' ? `<button class="btn sm ghost" data-run="${w.id}">${icon('play', 14)} Run now</button>` : ''}` : ''}
+          <table><tr>${actionBtns('workflows', w.id)}</tr></table></div></article>`).join('') || App.empty('No workflows yet', 'Create one to automate ticket assignment and creation.')}</div>
+      <section class="card"><header><h3>Execution log</h3></header>${logs.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>When</th><th>Workflow</th><th>Trigger</th><th>Ticket</th><th>Result</th></tr></thead><tbody>
+        ${logs.map((l) => `<tr><td>${App.fmtDateTime(l.at)}</td><td>${esc(l.workflow)}</td><td>${esc(l.trigger)}</td><td>${esc(l.ticket || '—')}</td><td><span class="pill ${l.status === 'success' ? 'st-resolved' : 'prio-critical'}">${esc(l.status)}</span> <small class="muted">${esc(l.detail)}</small></td></tr>`).join('')}
+      </tbody></table></div>` : '<p class="muted pad">No runs yet.</p>'}</section>`;
+    el.querySelector('#new')?.addEventListener('click', () => wfModal());
+    el.querySelectorAll('[data-toggle]').forEach((t) => t.addEventListener('change', async () => {
+      try { await App.put(`/api/workflows/${t.dataset.toggle}`, { enabled: t.checked }); App.toast(t.checked ? 'Workflow enabled' : 'Workflow disabled'); App.render(); } catch (e) { App.fail(e); }
+    }));
+    el.querySelectorAll('[data-run]').forEach((b) => b.addEventListener('click', async () => {
+      try { const r = await App.post(`/api/workflows/${b.dataset.run}/run`); App.toast(`${r.log.status}: ${r.log.detail}`); await App.refreshMeta(); App.render(); } catch (e) { App.fail(e); }
+    }));
+    bindRows(el, workflows, wfModal, async (w) => {
+      if (!await App.confirm('Delete workflow', `Delete “${w.name}”?`)) return;
+      try { await App.del(`/api/workflows/${w.id}`); App.toast('Workflow deleted'); App.render(); } catch (e) { App.fail(e); }
+    });
+  }
+
+  // ================= GENERAL =================
+  async function generalTab(el) {
+    const s = await App.get('/api/settings');
+    const canEdit = App.can('settings', 'edit');
+    el.innerHTML = `<form class="card settings-form" id="gs"><div class="form-grid">
+      <label>Workspace name<input name="companyName" value="${esc(s.companyName)}"></label>
+      <label>Ticket number prefix<input name="ticketPrefix" value="${esc(s.ticketPrefix)}" maxlength="6"></label>
+      <label>Daily target hours (per engineer)<input type="number" step="0.5" name="dailyTargetHours" value="${esc(s.dailyTargetHours)}"></label>
+      <label>Workload: green up to N open tickets<input type="number" min="1" name="workloadGreenMax" value="${esc(s.workloadGreenMax)}"></label>
+      <div class="span2 legend-row big"><span class="light light-free"><b></b>0 = Free (white)</span><span class="light light-available"><b></b>1–<span id="gmax">${esc(s.workloadGreenMax)}</span> = Available (green)</span><span class="light light-busy"><b></b>&gt;<span id="gmax2">${esc(s.workloadGreenMax)}</span> = Busy (red)</span></div>
+      <label class="span2">Activity types (comma separated)<input name="activityCategories" value="${esc(s.activityCategories.join(', '))}"></label>
+      <label class="span2">Ticket categories<input name="ticketCategories" value="${esc(s.ticketCategories.join(', '))}"></label>
+      <label class="span2">Ticket statuses<input name="ticketStatuses" value="${esc(s.ticketStatuses.join(', '))}"></label>
+      <label class="span2">Statuses that count as closed<input name="closedStatuses" value="${esc(s.closedStatuses.join(', '))}"></label>
+      <fieldset class="span2"><legend>SLA – hours to resolve by priority</legend><div class="grid4">${s.ticketPriorities.map((p) => `<label>${esc(p)}<input type="number" min="1" data-sla="${esc(p)}" value="${esc(s.slaHours?.[p] ?? 24)}"></label>`).join('')}</div></fieldset>
+      <label class="check"><input type="checkbox" name="notifyOnAssign" ${s.notifyOnAssign ? 'checked' : ''}> Email engineers when a ticket is assigned to them</label>
+      <label class="check"><input type="checkbox" name="notifyRequesterOnCreate" ${s.notifyRequesterOnCreate ? 'checked' : ''}> Send acknowledgement to requesters (email / portal tickets)</label>
+    </div>${canEdit ? '<footer><button class="btn primary" type="submit">Save settings</button></footer>' : ''}</form>`;
+    const f = el.querySelector('#gs');
+    f.workloadGreenMax.addEventListener('input', (e) => { el.querySelector('#gmax').textContent = e.target.value; el.querySelector('#gmax2').textContent = e.target.value; });
+    if (!canEdit) f.querySelectorAll('input').forEach((i) => { i.disabled = true; });
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = App.formData(f);
+      body.slaHours = {};
+      f.querySelectorAll('[data-sla]').forEach((i) => { body.slaHours[i.dataset.sla] = Number(i.value); });
+      body.workloadGreenMax = Number(body.workloadGreenMax); body.dailyTargetHours = Number(body.dailyTargetHours);
+      try { await App.put('/api/settings', body); App.toast('Settings saved'); await App.refreshMeta(); document.querySelector('.sidebar .brand span:last-child').textContent = App.meta.settings.companyName; App.render(); } catch (err) { App.fail(err); }
+    });
+  }
+
+  async function auditTab(el) {
+    const list = await App.get('/api/audit');
+    el.innerHTML = `<div class="card">${list.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>When</th><th>User</th><th>Action</th><th>Target</th></tr></thead><tbody>${list.map((a) => `<tr><td>${App.fmtDateTime(a.at)}</td><td>${esc(a.userName || '—')}</td><td><code>${esc(a.action)}</code></td><td>${esc(a.target || '')}</td></tr>`).join('')}</tbody></table></div>` : App.empty('No audit entries')}</div>`;
+  }
+
+  const RENDER = { users: usersTab, profiles: profilesTab, forms: formsTab, email: emailTab, workflows: workflowsTab, general: generalTab, audit: auditTab };
+
+  App.pages.settings = {
+    title: 'Settings',
+    async render(el, params) {
+      const tabs = TABS.filter((t) => App.can(t.perm));
+      if (!tabs.length) { el.innerHTML = App.empty('No access', 'Your profile has no administration permissions.'); return; }
+      const cur = tabs.find((t) => t.id === params[0]) || tabs[0];
+      el.innerHTML = `<div class="settings-layout"><nav class="settings-nav">${tabs.map((t) => `<a href="#/settings/${t.id}" class="${t.id === cur.id ? 'on' : ''}">${icon(t.icon, 16)} ${t.label}</a>`).join('')}</nav><div id="stab"></div></div>`;
+      await RENDER[cur.id](el.querySelector('#stab'));
+    },
+  };
+})();
