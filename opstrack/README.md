@@ -1,5 +1,7 @@
 # OpsTrack
 
+**Time tracking and IT service management (ITSM) for engineering and support teams.**
+
 A self-hosted web application for engineering and support teams that combines:
 
 - **Daily Tracker** – every engineer logs what they worked on each day: project,

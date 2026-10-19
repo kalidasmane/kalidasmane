@@ -1,5 +1,7 @@
 # OpsTrack
 
+**Time tracking and IT service management (ITSM) for engineering and support teams.**
+
 Daily effort tracker, project time dashboards, service-desk ticketing,
 email-to-ticket and workflow automation in one self-hosted web app.
 
