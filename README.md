@@ -1,13 +1,13 @@
-# Time Management and ITSM
+# OpsTrack
 
 Daily effort tracker, project time dashboards, service-desk ticketing,
 email-to-ticket and workflow automation in one self-hosted web app.
 
-The application lives in [`time-management-itsm/`](time-management-itsm/). See its
-[README](time-management-itsm/README.md) for features, local setup and deployment.
+The application lives in [`opstrack/`](opstrack/). See its
+[README](opstrack/README.md) for features, local setup and deployment.
 
 ```bash
-cd time-management-itsm
+cd opstrack
 npm install
 npm start          # http://localhost:3000  (admin / admin)
 ```

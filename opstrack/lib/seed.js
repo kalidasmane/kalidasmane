@@ -42,7 +42,7 @@ const DEFAULT_PROFILES = [
 ];
 
 const DEFAULT_SETTINGS = {
-  companyName: 'Time Management and ITSM',
+  companyName: 'OpsTrack',
   ticketPrefix: 'INC',
   workloadGreenMax: 3, // 1..greenMax open tickets = available (green); above = busy (red)
   dailyTargetHours: 8,

@@ -22,10 +22,10 @@
   // ---------- login ----------
   App.showLogin = () => {
     stopHeartbeat();
-    document.title = 'Sign in · Time Management and ITSM';
+    document.title = 'Sign in · OpsTrack';
     root.innerHTML = `<div class="login">
       <section class="login-hero">
-        <div class="brand big"><span class="logo">${icon('clock', 22)}</span><span>Time Management <em>&amp; ITSM</em></span></div>
+        <div class="brand big"><span class="logo">${icon('clock', 22)}</span><span>Ops<em>Track</em></span></div>
         <h1>Know where every hour goes.<br>Resolve every request.</h1>
         <p>Daily effort tracking, project time intelligence, service-desk ticketing, email-to-ticket and workflow automation — in one workspace.</p>
         <ul class="hero-points">

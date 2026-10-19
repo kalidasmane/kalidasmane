@@ -1,4 +1,4 @@
-// Time Management and ITSM — API server + static web app.
+// OpsTrack — API server + static web app.
 const path = require('path');
 const express = require('express');
 const db = require('./lib/db');
@@ -531,7 +531,7 @@ app.post('/api/email-accounts/:id/poll', requireAuth, requirePerm('email', 'edit
 app.post('/api/email-accounts/:id/send-test', requireAuth, requirePerm('email', 'edit'), async (req, res) => {
   const a = db.find('emailAccounts', req.params.id);
   if (!a || a.direction !== 'outbound') return bad(res, 'Outbound channel not found', 404);
-  await email.sendMail({ accountId: a.id, to: req.body?.to || req.user.email, subject: 'Test email from Time Management and ITSM', text: 'Your outbound email channel is working.' });
+  await email.sendMail({ accountId: a.id, to: req.body?.to || req.user.email, subject: 'Test email from OpsTrack', text: 'Your outbound email channel is working.' });
   const last = db.all('emailLog')[0];
   if (last?.status === 'sent') return res.json({ ok: true, message: `Test email sent to ${last.to}` });
   bad(res, `Send failed: ${last?.detail || 'unknown error'}`);
@@ -689,7 +689,7 @@ if (require.main === module) {
   db.load().then(() => {
     seed();
     app.listen(PORT, () => {
-      console.log(`Time Management and ITSM running at http://localhost:${PORT} (storage: ${process.env.DATABASE_URL ? 'PostgreSQL' : 'file'})`);
+      console.log(`OpsTrack running at http://localhost:${PORT} (storage: ${process.env.DATABASE_URL ? 'PostgreSQL' : 'file'})`);
       workflow.startScheduler();
       email.startInboundPolling();
     });

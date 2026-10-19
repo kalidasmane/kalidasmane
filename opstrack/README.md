@@ -1,4 +1,4 @@
-# Time Management and ITSM
+# OpsTrack
 
 A self-hosted web application for engineering and support teams that combines:
 
@@ -65,7 +65,7 @@ the dot immediately.
 Requires Node.js 18+.
 
 ```bash
-cd time-management-itsm
+cd opstrack
 npm install
 npm run demo     # optional: sample engineers, projects, 3 weeks of entries, tickets, workflows
 npm start        # http://localhost:3000
@@ -104,7 +104,7 @@ PostgreSQL database instead. Neither service needs a payment card.
    - `ADMIN_PASSWORD`: choose the password for the `admin` account. If you leave it blank,
      the password is `admin`, which anyone could guess on a public site.
 4. Click **Apply**. After the build, Render shows the address, for example
-   `https://time-management-itsm.onrender.com`.
+   `https://opstrack.onrender.com`.
 
 Free-plan behaviour: the app goes to sleep after 15 minutes without visitors.
 The next visit wakes it in about a minute. Your data is not affected.
@@ -115,7 +115,7 @@ If Supabase rejects the connection with a certificate error, add the variable
 To load sample data into the hosted database, run this from a computer that has a copy of the repository:
 
 ```bash
-cd time-management-itsm
+cd opstrack
 npm install
 DATABASE_URL='<your connection string>' npm run demo
 ```
@@ -126,10 +126,10 @@ For permanent file storage instead of PostgreSQL, change `plan: free` to
 ### Docker (any cloud VM, Azure, AWS, on-premises server)
 
 ```bash
-cd time-management-itsm
-docker build -t time-management-itsm .
-docker run -d --name itsm -p 3000:3000 -v itsm-data:/data \
-  -e ADMIN_PASSWORD='choose-a-strong-password' time-management-itsm
+cd opstrack
+docker build -t opstrack .
+docker run -d --name opstrack -p 3000:3000 -v opstrack-data:/data \
+  -e ADMIN_PASSWORD='choose-a-strong-password' opstrack
 ```
 
 Put it behind HTTPS (nginx, Caddy, IIS, or your cloud's load balancer).

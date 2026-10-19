@@ -1,7 +1,7 @@
 {
-  "name": "time-management-itsm",
+  "name": "opstrack",
   "version": "1.0.0",
-  "description": "Time Management and ITSM - daily effort tracker, dashboards, ticketing, email-to-ticket and workflow automation.",
+  "description": "OpsTrack - daily effort tracker, dashboards, ticketing, email-to-ticket and workflow automation.",
   "main": "server.js",
   "private": true,
   "scripts": {
