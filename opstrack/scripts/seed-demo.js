@@ -1,5 +1,5 @@
 // Populate the database with demo roles, team members, projects, ticket types,
-// tickets, daily tracker entries and workflows so every screen has realistic data.
+// tickets, devices, remote sessions, daily tracker entries and workflows so every screen has realistic data.
 // Run with:  npm run demo   (works with the JSON file or DATABASE_URL)
 const db = require('../lib/db');
 const { hashPassword } = require('../lib/auth');
@@ -71,6 +71,23 @@ const PROJECTS = [
   ['BKP', 'Backup Modernisation', 'Globex', 'veeam, backup job, retention', '#22c55e', 100, 'On Hold', 'anjali', ['sameer']],
   ['K8S', 'Kubernetes Platform', 'Initech', 'kubernetes, aks, helm', '#2563eb', 260, 'Active', 'karan', ['sameer', 'sneha', 'karan']],
   ['CRM', 'CRM Integration', 'Soylent Corp', 'crm, dynamics, salesforce', '#d946ef', 80, 'Completed', 'anjali', ['amit']],
+];
+
+// ---------- devices (12) ----------
+// [name, type, os, host, customer, location, project code|null, responsible username, tags]
+const DEVICES = [
+  ['ACME-LT-042', 'Laptop', 'Windows 11 Pro', '10.10.4.42', 'Acme Corp', 'Pune office', 'CLD', 'sneha', 'vip'],
+  ['ACME-WS-017', 'Workstation', 'Windows 10 Enterprise', '10.10.4.17', 'Acme Corp', 'Pune office', null, 'neha', ''],
+  ['GLOBEX-SAP-APP01', 'Server', 'Windows Server 2022', '172.16.1.21', 'Globex', 'Mumbai DC', 'ERP', 'amit', 'production, sap'],
+  ['GLOBEX-SQL-02', 'Server', 'Windows Server 2019', '172.16.1.32', 'Globex', 'Mumbai DC', null, 'amit', 'production, database'],
+  ['INITECH-FW-01', 'Firewall', 'FortiOS 7.4', '192.168.0.1', 'Initech', 'Bengaluru branch', 'NOC', 'vikram', 'network'],
+  ['INITECH-CORE-SW1', 'Network device', 'Cisco IOS-XE 17', '192.168.0.2', 'Initech', 'Bengaluru branch', 'NOC', 'vikram', 'network'],
+  ['UMB-WEB-01', 'Virtual machine', 'Ubuntu 22.04 LTS', '10.20.0.11', 'Umbrella Corp', 'Azure Central India', 'SEC', 'rohan', 'production, web'],
+  ['STARK-LT-108', 'Laptop', 'Windows 11 Pro', 'stark-lt-108', 'Stark Industries', 'Remote worker', 'M365', 'pooja', ''],
+  ['HOOLI-VDI-HOST1', 'Server', 'Windows Server 2022', '10.30.2.5', 'Hooli', 'Hyderabad DC', 'VDI', 'sneha', 'vdi'],
+  ['INITECH-K8S-NODE3', 'Virtual machine', 'Ubuntu 24.04 LTS', '10.40.0.13', 'Initech', 'AWS ap-south-1', 'K8S', 'sameer', 'kubernetes'],
+  ['IT-PRN-FL2', 'Printer', 'HP firmware 5.6', '10.0.2.50', 'Internal IT', 'Head office, 2nd floor', 'ITAM', 'arjun', ''],
+  ['IT-LT-OLD-003', 'Laptop', 'Windows 10 Pro', '', 'Internal IT', 'Store room', 'ITAM', 'meera', 'retired'],
 ];
 
 // ---------- tickets (15) ----------
@@ -173,6 +190,44 @@ async function main() {
     }
   }
 
+  // ---------- devices ----------
+  const byDevice = {};
+  DEVICES.forEach(([name, type, os, host, customer, location, code, owner, tags], i) => {
+    byDevice[name] = db.insert('devices', {
+      name, type, os, host, customer, location, projectId: code ? byCode[code].id : null, ownerId: uid(owner),
+      remoteId: `demo-node-${String(i + 1).padStart(2, '0')}`, tags, notes: '', active: tags !== 'retired',
+    });
+  });
+  // A few past remote sessions, each with its Daily Tracker entry.
+  const pastSessions = [
+    ['GLOBEX-SAP-APP01', 'amit', 'desktop', 2, 50, 'Restarted SAP services after the upgrade'],
+    ['INITECH-FW-01', 'vikram', 'terminal', 1, 35, 'Added NAT rule for the payment API'],
+    ['ACME-LT-042', 'neha', 'desktop', 1, 20, 'Fixed Outlook profile'],
+    ['UMB-WEB-01', 'rohan', 'terminal', 3, 45, 'Applied security patches'],
+    ['STARK-LT-108', 'pooja', 'desktop', 0, 25, 'Re-enrolled the laptop in Intune'],
+    ['IT-PRN-FL2', 'arjun', 'files', 4, 15, 'Updated printer firmware'],
+  ];
+  for (const [name, user, mode, daysAgo, minutes, notes] of pastSessions) {
+    const d = byDevice[name];
+    const start = new Date(today); start.setDate(start.getDate() - daysAgo); start.setHours(11, 0, 0, 0);
+    const end = new Date(start.getTime() + minutes * 60000);
+    const session = db.insert('remoteSessions', {
+      deviceId: d.id, userId: uid(user), ticketId: null, mode, startedAt: start.toISOString(), endedAt: end.toISOString(), minutes, notes,
+    });
+    const entry = db.insert('timesheets', {
+      userId: uid(user), date: start.toISOString().slice(0, 10), minutes, projectId: d.projectId, autoDetected: false,
+      category: 'Customer Support', activity: `${{ desktop: 'Remote desktop', terminal: 'Terminal', files: 'Files' }[mode]} – ${name}`,
+      notes, ticketId: null, startTime: '', endTime: '', billable: false, customer: d.customer, remoteSessionId: session.id,
+    });
+    session.timesheetId = entry.id;
+  }
+  const ticketDevice = {
+    'VPN not connecting from home office': 'STARK-LT-108', 'Outlook keeps asking for a password': 'ACME-LT-042',
+    'SAP login error after the ERP upgrade': 'GLOBEX-SAP-APP01', 'Recurring disk-full alerts on the SQL cluster': 'GLOBEX-SQL-02',
+    'Production web server down after patching': 'UMB-WEB-01', 'Firewall rule change for the new payment API': 'INITECH-FW-01',
+    'Kubernetes pods restarting in the staging namespace': 'INITECH-K8S-NODE3',
+  };
+
   // ---------- tickets ----------
   const tickets = require('../lib/tickets');
   for (const [subject, category, priority, status, assignee, source, requester, code] of TICKETS) {
@@ -181,6 +236,7 @@ async function main() {
       assigneeId: uid(assignee), requesterName: requester,
       requesterEmail: `${requester.toLowerCase().replace(/[^a-z]+/g, '.')}@customer.example`,
       projectId: code ? byCode[code].id : null,
+      deviceId: ticketDevice[subject] ? byDevice[ticketDevice[subject]].id : null,
     }, admin, { source, skipWorkflows: true });
     if (status !== 'New') tickets.update(t, { status }, admin, { skipWorkflows: true });
     // Log some time against tickets that are being worked on.
@@ -223,7 +279,7 @@ async function main() {
 
   await db.close();
   console.log(`Demo data loaded: ${PEOPLE.length} team members, ${db.all('profiles').length} roles, ${PROJECTS.length} projects, `
-    + `${TICKET_TYPES.length} ticket types, ${TICKETS.length} tickets, ${db.all('timesheets').length} tracker entries.`);
+    + `${TICKET_TYPES.length} ticket types, ${TICKETS.length} tickets, ${DEVICES.length} devices, ${db.all('timesheets').length} tracker entries.`);
   console.log(`Demo users (password ${DEMO_PASSWORD}): ${PEOPLE.map((p) => p[0]).join(', ')}`);
 }
 

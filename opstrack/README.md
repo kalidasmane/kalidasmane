@@ -17,6 +17,11 @@ A self-hosted web application for engineering and support teams that combines:
   date range, engineer and project; show/hide widgets per user.
 - **Tickets (ITSM)** – service-desk queue with priorities, SLA due dates,
   conversation, internal notes, history and time logging against tickets.
+- **Devices & Remote** – inventory of PCs, servers and network devices, with one-click
+  **remote desktop, terminal and file sessions** through MeshCentral or Apache Guacamole.
+  Sessions open inside OpsTrack with a timer and notes. When an engineer ends a session,
+  its time is logged to their Daily Tracker, linked to the ticket and project.
+  See [Remote management](#remote-management).
 - **Projects** – create / modify / delete projects with code, client,
   manager, budget hours and auto-detect keywords; project page shows effort by
   engineer and activity.
@@ -88,6 +93,7 @@ The demo script loads a realistic sample organisation. It runs only on an empty 
 | Ticket types | 12 | Incident, Service Request, Problem, Change Request, Access Request, Hardware, Software Installation, Network, Security, Email & Collaboration, Password Reset, Query |
 | Tickets | 15 | spread over every status, priority and channel (web, email, form, portal, automation) |
 | Tracker entries | ~1,200 | 3 weeks of project work, customer support, meetings and training |
+| Devices | 12 | laptops, servers, VMs, firewall, switch, printer (one retired), with 6 past remote sessions |
 | Workflows | 4 | critical-incident auto-assign, VPN/network routing, security routing, daily health-check ticket |
 
 All demo users have the password `Welcome@123`:
@@ -175,6 +181,50 @@ Put it behind HTTPS (nginx, Caddy, IIS, or your cloud's load balancer).
 | `DATABASE_SSL_VERIFY` | `true` | Set to `false` if the database uses a certificate Node.js can't verify |
 | `TRUST_PROXY` | `1` | Number of reverse proxies in front of the app; set to `0` when exposed directly |
 
+## Remote management
+
+Engineers start remote sessions from **Devices & Remote**, or from a ticket that has a device
+linked. OpsTrack doesn't stream screens itself. It connects to a free, self-hosted
+remote-management server that you run:
+
+| Server | What engineers get | Device ID to enter in OpsTrack |
+|--------|--------------------|-------------------------------|
+| **MeshCentral** (recommended) | Remote desktop, terminal and file transfer for Windows, Linux and macOS. A small agent connects out to MeshCentral, so devices behind firewalls and NAT work. | The node ID. In MeshCentral, open the device and copy the value after `gotonode=` in the address bar. |
+| **Apache Guacamole** | RDP, VNC and SSH in the browser, with no agent on the device. Guacamole must be able to reach each device. | The connection ID shown in Guacamole's connection settings. |
+| **Other tool** | Any tool that can open a device from a URL. | Whatever your URL template's `{id}` expects. |
+
+**Setting up MeshCentral**
+1. Install it on a server that engineers and devices can reach:
+   `npm install meshcentral && node node_modules/meshcentral`. The official Docker image also works.
+2. Create the admin account and a device group. Install the agent on each device from **Add Agent**.
+3. To show sessions inside OpsTrack, add this to `meshcentral-data/config.json` and restart:
+   ```json
+   { "settings": { "allowedFramingOrigins": "https://ops.yourcompany.com" } }
+   ```
+   This lets only your OpsTrack address embed MeshCentral.
+4. Serve OpsTrack and MeshCentral over **HTTPS on the same domain**, for example
+   `ops.yourcompany.com` and `mesh.yourcompany.com`. MeshCentral's login cookie is `SameSite=Lax`,
+   so browsers don't send it to an embedded view from another site. If the two run on different
+   domains (for example OpsTrack on `onrender.com`), untick **Open sessions inside OpsTrack** in
+   Settings → Remote Desktop, and sessions open in a new tab instead.
+5. Give each engineer a MeshCentral account with rights on their device groups. They sign in to
+   MeshCentral once in their browser.
+6. In OpsTrack: **Settings → Remote Desktop**, choose MeshCentral, enter the server address, then
+   add devices with their node IDs.
+
+**How sessions are recorded**
+- **Start:** clicking Remote desktop, Terminal or Files creates a session record (engineer, device,
+  ticket, start time) and adds an entry to the audit log.
+- **During:** the session page shows a timer, a ticket selector and a notes box that saves as you type.
+- **End:** *End session & log time* writes a Daily Tracker entry, for example
+  "Remote desktop – GLOBEX-SAP-APP01 (INC-1012)". The entry uses the activity type chosen in
+  settings and links to the device's project and the ticket. Closing the browser also ends the session.
+- **History:** every device shows its session history and the tickets linked to it.
+
+**Permissions** (Profiles → *Devices & Remote*): *View* the inventory, *Create / Modify / Delete*
+devices, and *Connect* to start sessions. Engineers and support agents can view and connect by
+default. Managers can also add and edit devices.
+
 ## Data visibility rules
 
 - Users with **Daily Tracker → See everyone** see everyone's entries.
@@ -194,6 +244,7 @@ lib/auth.js          password hashing (scrypt), sessions, presence, permissions
 lib/seed.js          default profiles, admin user, settings, sample form
 lib/tickets.js       ticket service, workload calculation, notifications
 lib/workflow.js      workflow engine + scheduler
+lib/remote.js        remote desktop links (MeshCentral / Guacamole / custom) and session logging
 lib/email.js         SMTP (nodemailer) / IMAP (imapflow) channels
 public/              single-page web app (vanilla JS + Chart.js)
 scripts/seed-demo.js demo data

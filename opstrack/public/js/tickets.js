@@ -26,6 +26,7 @@
               <label>Category<select name="category">${App.options(s.ticketCategories)}</select></label>
               <label>Priority<select name="priority">${App.options(s.ticketPriorities, 'Medium')}</select></label>
               <label>Project<select name="projectId">${App.projectOptions('')}</select></label>
+              ${App.meta.devices?.length ? `<label>Device<select name="deviceId">${App.options(App.meta.devices.map((d) => ({ value: d.id, label: `${d.name}${d.customer ? ` · ${d.customer}` : ''}` })), '', { blank: '— None —' })}</select></label>` : ''}
               ${canAssign ? `<label>Assign to <small class="muted">(hover a light to see workload)</small>${App.userPicker('assigneeId', '')}</label>` : ''}
             </div>`;
           } else {
@@ -138,6 +139,8 @@
             <label>Assignee ${canAssign ? '' : '<small class="muted">(no assign permission)</small>'}${canAssign ? App.userPicker('assigneeId', t.assigneeId) : `<div>${App.userChip(App.user(t.assigneeId))}</div>`}</label>
             ${!t.assigneeId && canEdit && !App.can('tickets', 'assign') ? '<button type="button" class="btn sm" id="take">Assign to me</button>' : ''}
             <label>Project<select name="projectId" ${canEdit ? '' : 'disabled'}>${App.projectOptions(t.projectId)}</select></label>
+            ${App.meta.devices?.length || t.deviceId ? `<label>Device<select name="deviceId" ${canEdit ? '' : 'disabled'}>${App.options(App.meta.devices.map((d) => ({ value: d.id, label: d.name })), t.deviceId, { blank: '— None —' })}</select></label>` : ''}
+            ${t.deviceId && App.can('devices', 'connect') ? `<button type="button" class="btn sm primary remote-btn" id="remote">${icon('monitor', 15)} Remote session to ${esc(t.deviceName || 'device')}</button>` : ''}
             <dl class="facts"><dt>Due (SLA)</dt><dd class="${t.overdue ? 'bad' : ''}">${App.fmtDateTime(t.dueAt)}</dd><dt>Resolved</dt><dd>${App.fmtDateTime(t.resolvedAt)}</dd><dt>Time spent</dt><dd>${fmtMins(t.timeSpentMinutes)}</dd></dl>
           </form>
           <section class="card">
@@ -158,6 +161,7 @@
       } catch (e) { App.fail(e); }
     });
     App.enhance(props);
+    el.querySelector('#remote')?.addEventListener('click', () => App.startRemote(t.deviceId, 'desktop', t.id));
     el.querySelector('#take')?.addEventListener('click', async () => {
       try { await App.put(`/api/tickets/${t.id}`, { assigneeId: App.me.id }); await App.refreshMeta(); App.render(); } catch (e) { App.fail(e); }
     });

@@ -64,6 +64,7 @@ function create(data, actor, { source = 'web', skipWorkflows = false } = {}) {
     status: data.status && s.ticketStatuses.includes(data.status) ? data.status : 'New',
     assigneeId: data.assigneeId || null,
     projectId: data.projectId || null,
+    deviceId: data.deviceId || null,
     requesterName: data.requesterName || actor?.name || '',
     requesterEmail: data.requesterEmail || actor?.email || '',
     formId: data.formId || null,
@@ -88,7 +89,7 @@ function create(data, actor, { source = 'web', skipWorkflows = false } = {}) {
   return t;
 }
 
-const TRACKED = ['subject', 'description', 'category', 'priority', 'status', 'assigneeId', 'projectId'];
+const TRACKED = ['subject', 'description', 'category', 'priority', 'status', 'assigneeId', 'projectId', 'deviceId'];
 
 function update(t, patch, actor, { skipWorkflows = false } = {}) {
   const s = settings();
@@ -103,6 +104,7 @@ function update(t, patch, actor, { skipWorkflows = false } = {}) {
     t[k] = v;
     if (k === 'assigneeId') changes.push(`Assignee: ${userName(before.assigneeId)} → ${userName(v)}`);
     else if (k === 'projectId') changes.push(`Project: ${db.find('projects', v)?.name || 'None'}`);
+    else if (k === 'deviceId') changes.push(`Device: ${db.find('devices', v)?.name || 'None'}`);
     else if (k !== 'description') changes.push(`${k[0].toUpperCase() + k.slice(1)}: ${before[k] ?? '—'} → ${v}`);
     else changes.push('Description updated');
   }

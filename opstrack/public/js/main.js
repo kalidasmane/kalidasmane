@@ -8,6 +8,7 @@
     { id: 'tracker', label: 'Daily Tracker', icon: 'clock', perm: 'timesheet' },
     { id: 'tickets', label: 'Tickets', icon: 'ticket', perm: 'tickets' },
     { id: 'projects', label: 'Projects', icon: 'folder', perm: 'projects' },
+    { id: 'devices', label: 'Devices & Remote', icon: 'monitor', perm: 'devices' },
     { id: 'reports', label: 'Reports', icon: 'chart', perm: 'reports' },
     { id: 'team', label: 'Team', icon: 'users', perm: null },
   ];
