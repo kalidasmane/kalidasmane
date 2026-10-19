@@ -86,6 +86,43 @@ Environment variables:
 For production, put it behind HTTPS (nginx, IIS ARR, Caddy, or a cloud load
 balancer) and back up `data/db.json`.
 
+## Deploying online
+
+### Render (recommended – a few clicks)
+
+The repository root contains a `render.yaml` Blueprint.
+
+1. Sign in at [render.com](https://render.com) with your GitHub account.
+2. Click **New → Blueprint**, pick this repository and the branch that contains `render.yaml`.
+3. When asked for `ADMIN_PASSWORD`, enter the password you want for the `admin` account.
+   If you leave it blank, the password is `admin`, which anyone could guess on a public site.
+4. Click **Apply**. After the build, Render gives you a URL such as
+   `https://time-management-itsm.onrender.com`.
+
+The Blueprint uses the **Starter** instance with a 1 GB persistent disk mounted at
+`/var/data`, so users, tickets and tracker entries survive restarts and redeploys.
+At the time of writing this costs about US$7.25 per month.
+On Render's **free** instance there is no persistent disk, so all data is wiped whenever the service restarts or redeploys.
+Only use free for a short trial.
+
+To load sample data on the hosted copy, open the service's **Shell** tab and run `npm run demo`.
+
+### Docker (any cloud VM, Azure, AWS, on-premises server)
+
+```bash
+cd time-management-itsm
+docker build -t time-management-itsm .
+docker run -d --name itsm -p 3000:3000 -v itsm-data:/data \
+  -e ADMIN_PASSWORD='choose-a-strong-password' time-management-itsm
+```
+
+Put it behind HTTPS (nginx, Caddy, IIS, or your cloud's load balancer).
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `ADMIN_PASSWORD` | `admin` | Password for the `admin` account created on first start (ignored once it exists) |
+| `TRUST_PROXY` | `1` | Number of reverse proxies in front of the app; set to `0` when exposed directly |
+
 ## Data visibility rules
 
 - Users with **Daily Tracker → See everyone** see everyone's entries.

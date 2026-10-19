@@ -13,6 +13,8 @@ seed();
 
 const app = express();
 app.disable('x-powered-by');
+// Behind a hosting proxy (Render, nginx, …) so req.secure / req.ip reflect the real client.
+app.set('trust proxy', Number(process.env.TRUST_PROXY ?? 1));
 app.use(express.json({ limit: '1mb' }));
 app.use((req, res, next) => {
   res.set({ 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'same-origin' });
@@ -41,6 +43,8 @@ function publicUser(u) {
 function maskAccount(a) {
   return { ...a, password: a.password ? '********' : '' };
 }
+
+app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 // ---------- auth ----------
 const loginAttempts = new Map();
