@@ -80,7 +80,7 @@
       <div class="card">${list.length ? `<div class="table-wrap"><table class="table hover">
         <thead><tr><th>Ticket</th><th>Subject</th><th>Requester</th><th>Priority</th><th>Status</th><th>Assignee</th><th>Due</th><th class="num">Time</th></tr></thead>
         <tbody>${list.map((t) => `<tr data-open="${t.id}">
-          <td><span class="src" title="via ${esc(t.source)}">${icon(SOURCE_ICON[t.source] || 'ticket', 15)}</span><b>${esc(t.number)}</b></td>
+          <td class="nowrap"><span class="src" title="via ${esc(t.source)}">${icon(SOURCE_ICON[t.source] || 'ticket', 15)}</span><b>${esc(t.number)}</b></td>
           <td class="subject"><b>${esc(t.subject)}</b><small class="muted">${esc(t.category)}${t.projectName ? ` · ${esc(t.projectName)}` : ''}${t.commentCount ? ` · ${t.commentCount} comment(s)` : ''}</small></td>
           <td>${esc(t.requesterName || '')}<small class="muted">${esc(t.requesterEmail || '')}</small></td>
           <td>${App.priorityPill(t.priority)}</td><td>${App.statusPill(t.status)}</td>

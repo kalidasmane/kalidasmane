@@ -69,14 +69,46 @@ Requires Node.js 18+.
 ```bash
 cd opstrack
 npm install
-npm run demo     # optional: sample engineers, projects, 3 weeks of entries, tickets, workflows
+npm run demo     # optional: sample team, roles, projects, ticket types, tickets, 3 weeks of entries
 npm start        # http://localhost:3000
 ```
 
 Sign in with **username `admin`, password `admin`**. Change the password from
-the user menu after the first sign-in. Demo users (if you ran `npm run demo`):
-`priya`, `rahul` (managers), `amit`, `sneha`, `vikram` (engineers), `neha`,
-`arjun` (support), all with password `Welcome@123`.
+the user menu after the first sign-in.
+
+#### Demo data (`npm run demo`)
+
+The demo script loads a realistic sample organisation. It runs only on an empty database.
+
+| What | Count | Examples |
+|------|-------|----------|
+| Team members | 15 | managers, team leads, engineers, L1/L2 support, intern, auditor |
+| Roles (profiles) | 13 | Administrator, Manager, Project Manager, Team Lead, Engineer, Cloud / DevOps Engineer, Network Engineer, Security Analyst, L2 Support Engineer, Support Agent, Customer Success, Intern, Auditor (read-only) |
+| Projects | 13 | Cloud Migration, ERP Upgrade, Network Refresh, SD-WAN Deployment, Kubernetes Platform, SIEM Implementation (Planned), Backup Modernisation (On Hold), CRM Integration (Completed)… |
+| Ticket types | 12 | Incident, Service Request, Problem, Change Request, Access Request, Hardware, Software Installation, Network, Security, Email & Collaboration, Password Reset, Query |
+| Tickets | 15 | spread over every status, priority and channel (web, email, form, portal, automation) |
+| Tracker entries | ~1,200 | 3 weeks of project work, customer support, meetings and training |
+| Workflows | 4 | critical-incident auto-assign, VPN/network routing, security routing, daily health-check ticket |
+
+All demo users have the password `Welcome@123`:
+
+| Username | Name | Role | Reports to |
+|----------|------|------|------------|
+| `priya` | Priya Sharma | Manager – Engineering | admin |
+| `rahul` | Rahul Verma | Manager – Service Desk | admin |
+| `anjali` | Anjali Desai | Project Manager | admin |
+| `karan` | Karan Singh | Team Lead – Cloud | priya |
+| `meera` | Meera Iyer | Team Lead – Service Desk | rahul |
+| `amit` | Amit Patil | Engineer | karan |
+| `sneha` | Sneha Kulkarni | Cloud / DevOps Engineer | karan |
+| `sameer` | Sameer Khan | Cloud / DevOps Engineer | karan |
+| `vikram` | Vikram Rao | Network Engineer | priya |
+| `rohan` | Rohan Gupta | Security Analyst | priya |
+| `pooja` | Pooja Nair | L2 Support Engineer | meera |
+| `neha` | Neha Joshi | Support Agent (L1) – has 4 open tickets, so shows the red “busy” light | meera |
+| `arjun` | Arjun Mehta | Support Agent (L1) | meera |
+| `fatima` | Fatima Shaikh | Intern | amit |
+| `lakshmi` | Lakshmi Rao | Auditor (read-only) | admin |
 
 Environment variables:
 
