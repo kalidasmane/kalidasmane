@@ -8,9 +8,6 @@ const tickets = require('./lib/tickets');
 const workflow = require('./lib/workflow');
 const email = require('./lib/email');
 
-db.load();
-seed();
-
 const app = express();
 app.disable('x-powered-by');
 // Behind a hosting proxy (Render, nginx, …) so req.secure / req.ip reflect the real client.
@@ -689,10 +686,16 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 
 const PORT = Number(process.env.PORT) || 3000;
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`Time Management and ITSM running at http://localhost:${PORT}`);
-    workflow.startScheduler();
-    email.startInboundPolling();
+  db.load().then(() => {
+    seed();
+    app.listen(PORT, () => {
+      console.log(`Time Management and ITSM running at http://localhost:${PORT} (storage: ${process.env.DATABASE_URL ? 'PostgreSQL' : 'file'})`);
+      workflow.startScheduler();
+      email.startInboundPolling();
+    });
+  }).catch((e) => {
+    console.error('Could not load data:', e.message);
+    process.exit(1);
   });
 }
 
