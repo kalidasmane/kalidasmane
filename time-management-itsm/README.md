@@ -88,24 +88,40 @@ balancer) and back up `data/db.json`.
 
 ## Deploying online
 
-### Render (recommended – a few clicks)
+### Render – free (recommended)
 
-The repository root contains a `render.yaml` Blueprint.
+Render's free plan has no permanent disk, so the app stores its data in a free
+PostgreSQL database instead. Neither service needs a payment card.
 
-1. Sign in at [render.com](https://render.com) with your GitHub account.
-2. Click **New → Blueprint**, pick this repository and the branch that contains `render.yaml`.
-3. When asked for `ADMIN_PASSWORD`, enter the password you want for the `admin` account.
-   If you leave it blank, the password is `admin`, which anyone could guess on a public site.
-4. Click **Apply**. After the build, Render gives you a URL such as
+1. **Create the database.** Sign up at [neon.tech](https://neon.tech) (or
+   [supabase.com](https://supabase.com)) and create a project. Copy its connection string.
+   It looks like `postgresql://user:password@ep-xxxx.region.aws.neon.tech/neondb?sslmode=require`.
+   On Supabase, use the *Session pooler* string from **Connect**.
+2. **Create the app.** Sign in at [render.com](https://render.com) with GitHub, click
+   **New → Blueprint** and pick this repository. Render reads `render.yaml`.
+3. When Render asks for:
+   - `DATABASE_URL`: paste the connection string from step 1.
+   - `ADMIN_PASSWORD`: choose the password for the `admin` account. If you leave it blank,
+     the password is `admin`, which anyone could guess on a public site.
+4. Click **Apply**. After the build, Render shows the address, for example
    `https://time-management-itsm.onrender.com`.
 
-The Blueprint uses the **Starter** instance with a 1 GB persistent disk mounted at
-`/var/data`, so users, tickets and tracker entries survive restarts and redeploys.
-At the time of writing this costs about US$7.25 per month.
-On Render's **free** instance there is no persistent disk, so all data is wiped whenever the service restarts or redeploys.
-Only use free for a short trial.
+Free-plan behaviour: the app goes to sleep after 15 minutes without visitors.
+The next visit wakes it in about a minute. Your data is not affected.
 
-To load sample data on the hosted copy, open the service's **Shell** tab and run `npm run demo`.
+If Supabase rejects the connection with a certificate error, add the variable
+`DATABASE_SSL_VERIFY=false` in the Render service's **Environment** tab.
+
+To load sample data into the hosted database, run this from a computer that has a copy of the repository:
+
+```bash
+cd time-management-itsm
+npm install
+DATABASE_URL='<your connection string>' npm run demo
+```
+
+For permanent file storage instead of PostgreSQL, change `plan: free` to
+`plan: starter` in `render.yaml` and add a disk. That costs about US$7.25 per month.
 
 ### Docker (any cloud VM, Azure, AWS, on-premises server)
 
@@ -121,6 +137,8 @@ Put it behind HTTPS (nginx, Caddy, IIS, or your cloud's load balancer).
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `ADMIN_PASSWORD` | `admin` | Password for the `admin` account created on first start (ignored once it exists) |
+| `DATABASE_URL` | – | PostgreSQL connection string. When set, data is stored there instead of `DATA_DIR` |
+| `DATABASE_SSL_VERIFY` | `true` | Set to `false` if the database uses a certificate Node.js can't verify |
 | `TRUST_PROXY` | `1` | Number of reverse proxies in front of the app; set to `0` when exposed directly |
 
 ## Data visibility rules
@@ -137,7 +155,7 @@ Put it behind HTTPS (nginx, Caddy, IIS, or your cloud's load balancer).
 
 ```
 server.js            Express API + static hosting
-lib/db.js            JSON-file datastore (atomic writes)
+lib/db.js            datastore: JSON file, or PostgreSQL when DATABASE_URL is set
 lib/auth.js          password hashing (scrypt), sessions, presence, permissions
 lib/seed.js          default profiles, admin user, settings, sample form
 lib/tickets.js       ticket service, workload calculation, notifications
