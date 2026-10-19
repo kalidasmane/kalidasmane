@@ -1,0 +1,23 @@
+{
+  "name": "time-management-itsm",
+  "version": "1.0.0",
+  "description": "Time Management and ITSM - daily effort tracker, dashboards, ticketing, email-to-ticket and workflow automation.",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "demo": "node scripts/seed-demo.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "chart.js": "^4.5.1",
+    "express": "^5.3.0",
+    "imapflow": "^2.5.2",
+    "mailparser": "^3.9.40",
+    "nodemailer": "^10.1.2"
+  }
+}
