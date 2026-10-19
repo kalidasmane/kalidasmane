@@ -66,11 +66,11 @@ function seed() {
     const admin = db.all('profiles').find((p) => p.key === 'admin');
     db.insert('users', {
       username: 'admin', name: 'Administrator', email: 'admin@example.com',
-      passwordHash: hashPassword('admin'), profileId: admin.id, managerId: null,
+      passwordHash: hashPassword(process.env.ADMIN_PASSWORD || 'admin'), profileId: admin.id, managerId: null,
       department: 'IT', designation: 'System Administrator', phone: '', active: true,
       lastSeen: null, mustChangePassword: false,
     });
-    console.log('Created default login  ->  username: admin   password: admin');
+    console.log(`Created default login  ->  username: admin   password: ${process.env.ADMIN_PASSWORD ? '(from ADMIN_PASSWORD)' : 'admin'}`);
   }
   if (!db.all('forms').length) {
     db.insert('forms', {
