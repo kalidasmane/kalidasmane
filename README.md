@@ -14,4 +14,7 @@ npm install
 npm start          # http://localhost:3000  (admin / admin)
 ```
 
-To deploy on Render, use the `render.yaml` Blueprint in this folder: Render dashboard → **New → Blueprint**.
+Ways to deploy:
+
+- **Render**: use the `render.yaml` Blueprint in this folder (Render dashboard → **New → Blueprint**).
+- **Your own Ubuntu server**, with MeshCentral for remote desktop: [`opstrack/deploy`](opstrack/deploy/README.md) has a one-command installer.
