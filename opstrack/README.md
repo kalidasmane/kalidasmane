@@ -193,7 +193,9 @@ remote-management server that you run:
 | **Apache Guacamole** | RDP, VNC and SSH in the browser, with no agent on the device. Guacamole must be able to reach each device. | The connection ID shown in Guacamole's connection settings. |
 | **Other tool** | Any tool that can open a device from a URL. | Whatever your URL template's `{id}` expects. |
 
-**Setting up MeshCentral**
+**Setting up MeshCentral.** The quickest way is the one-command installer in
+[`deploy/`](deploy/README.md). It puts OpsTrack and MeshCentral on one Ubuntu server with automatic HTTPS.
+To set it up by hand:
 1. Install it on a server that engineers and devices can reach:
    `npm install meshcentral && node node_modules/meshcentral`. The official Docker image also works.
 2. Create the admin account and a device group. Install the agent on each device from **Add Agent**.

@@ -809,10 +809,11 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 });
 
 const PORT = Number(process.env.PORT) || 3000;
+const HOST = process.env.HOST || undefined; // e.g. 127.0.0.1 behind a reverse proxy
 if (require.main === module) {
   db.load().then(() => {
     seed();
-    app.listen(PORT, () => {
+    app.listen(PORT, HOST, () => {
       console.log(`OpsTrack running at http://localhost:${PORT} (storage: ${process.env.DATABASE_URL ? 'PostgreSQL' : 'file'})`);
       workflow.startScheduler();
       email.startInboundPolling();
