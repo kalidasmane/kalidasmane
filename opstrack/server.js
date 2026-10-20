@@ -1,4 +1,4 @@
-// Time Management and ITSM — API server + static web app.
+// OpsTrack — API server + static web app.
 const path = require('path');
 const express = require('express');
 const db = require('./lib/db');
@@ -7,6 +7,7 @@ const { seed } = require('./lib/seed');
 const tickets = require('./lib/tickets');
 const workflow = require('./lib/workflow');
 const email = require('./lib/email');
+const remote = require('./lib/remote');
 
 const app = express();
 app.disable('x-powered-by');
@@ -99,6 +100,8 @@ app.get('/api/meta', requireAuth, (req, res) => {
     forms: db.all('forms').map((f) => pick(f, ['id', 'name', 'active', 'public'])),
     workflowMeta: { triggers: workflow.TRIGGERS, operators: workflow.OPERATORS, actions: workflow.ACTIONS },
     emailProviders: email.PROVIDERS,
+    remoteProviders: remote.PROVIDERS,
+    devices: can(req.user, 'devices', 'view') ? db.all('devices').map((d) => pick(d, ['id', 'name', 'type', 'customer'])) : [],
   });
 });
 
@@ -358,6 +361,7 @@ function ticketOut(t, full = false) {
     ...t, assigneeName: db.find('users', t.assigneeId)?.name || null,
     projectName: db.find('projects', t.projectId)?.name || null,
     formName: db.find('forms', t.formId)?.name || null, timeSpentMinutes: minutes,
+    deviceName: db.find('devices', t.deviceId)?.name || null,
     overdue: !tickets.isClosed(t) && t.dueAt && new Date(t.dueAt) < new Date(),
     commentCount: (t.comments || []).filter((c) => !c.system).length,
   };
@@ -388,7 +392,7 @@ app.post('/api/tickets', requireAuth, requirePerm('tickets', 'create'), (req, re
   const b = req.body || {};
   if (!b.subject) return bad(res, 'Subject is required');
   if (b.assigneeId && !can(req.user, 'tickets', 'assign')) b.assigneeId = null;
-  const t = tickets.create(pick(b, ['subject', 'description', 'category', 'priority', 'assigneeId', 'projectId', 'requesterName', 'requesterEmail']), req.user, { source: 'web' });
+  const t = tickets.create(pick(b, ['subject', 'description', 'category', 'priority', 'assigneeId', 'projectId', 'deviceId', 'requesterName', 'requesterEmail']), req.user, { source: 'web' });
   res.json(ticketOut(t));
 });
 
@@ -415,6 +419,119 @@ app.post('/api/tickets/:id/comments', requireAuth, requirePerm('tickets', 'view'
   if (!req.body?.text) return bad(res, 'Comment text is required');
   tickets.addComment(t, req.body.text, req.user, { internal: !!req.body.internal });
   res.json(ticketOut(t, true));
+});
+
+// ---------- devices & remote sessions ----------
+const DEVICE_TYPES = ['Workstation', 'Laptop', 'Server', 'Virtual machine', 'Network device', 'Firewall', 'Printer', 'Mobile device', 'Other'];
+const DEVICE_FIELDS = ['name', 'type', 'os', 'host', 'customer', 'location', 'projectId', 'ownerId', 'remoteId', 'tags', 'notes', 'active'];
+
+function sessionOut(x) {
+  const d = db.find('devices', x.deviceId);
+  return {
+    ...x, userName: db.find('users', x.userId)?.name || 'Deleted user', deviceName: d?.name || x.deviceName || 'Deleted device',
+    ticketNumber: db.find('tickets', x.ticketId)?.number || null,
+  };
+}
+
+function deviceOut(d) {
+  const sessions = db.where('remoteSessions', (x) => x.deviceId === d.id);
+  const last = sessions.reduce((a, b) => (!a || b.startedAt > a.startedAt ? b : a), null);
+  return {
+    ...d, projectName: db.find('projects', d.projectId)?.name || null, ownerName: db.find('users', d.ownerId)?.name || null,
+    sessionCount: sessions.length, lastSession: last ? sessionOut(last) : null,
+    activeSessions: sessions.filter((x) => !x.endedAt).map(sessionOut),
+    openTickets: db.where('tickets', (t) => t.deviceId === d.id && !tickets.isClosed(t)).length,
+  };
+}
+
+function cleanDevice(b) {
+  const patch = pick(b, DEVICE_FIELDS);
+  if ('type' in patch && !DEVICE_TYPES.includes(patch.type)) patch.type = 'Other';
+  for (const k of ['projectId', 'ownerId']) if (k in patch) patch[k] = patch[k] || null;
+  for (const k of ['name', 'os', 'host', 'customer', 'location', 'remoteId', 'tags']) if (k in patch) patch[k] = String(patch[k] || '').trim().slice(0, 300);
+  return patch;
+}
+
+app.get('/api/devices', requireAuth, requirePerm('devices', 'view'), (req, res) => {
+  res.json({ devices: db.all('devices').map(deviceOut), types: DEVICE_TYPES });
+});
+app.get('/api/devices/:id', requireAuth, requirePerm('devices', 'view'), (req, res) => {
+  const d = db.find('devices', req.params.id);
+  if (!d) return bad(res, 'Device not found', 404);
+  res.json({
+    ...deviceOut(d),
+    sessions: db.where('remoteSessions', (x) => x.deviceId === d.id).sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, 100).map(sessionOut),
+    tickets: db.where('tickets', (t) => t.deviceId === d.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((t) => pick(t, ['id', 'number', 'subject', 'status', 'priority'])),
+  });
+});
+app.post('/api/devices', requireAuth, requirePerm('devices', 'create'), (req, res) => {
+  const patch = cleanDevice(req.body || {});
+  if (!patch.name) return bad(res, 'Device name is required');
+  res.json(deviceOut(db.insert('devices', { type: 'Workstation', active: true, ...patch })));
+});
+app.put('/api/devices/:id', requireAuth, requirePerm('devices', 'edit'), (req, res) => {
+  const d = db.find('devices', req.params.id);
+  if (!d) return bad(res, 'Device not found', 404);
+  const patch = cleanDevice(req.body || {});
+  if ('name' in patch && !patch.name) return bad(res, 'Device name is required');
+  res.json(deviceOut(db.update('devices', d.id, patch)));
+});
+app.delete('/api/devices/:id', requireAuth, requirePerm('devices', 'delete'), (req, res) => {
+  const d = db.find('devices', req.params.id);
+  if (!d) return bad(res, 'Device not found', 404);
+  for (const x of db.all('remoteSessions')) if (x.deviceId === d.id) x.deviceName = d.name;
+  for (const t of db.all('tickets')) if (t.deviceId === d.id) t.deviceId = null;
+  db.remove('devices', d.id);
+  res.json({ ok: true });
+});
+
+// Start a remote session: returns the session and the URL to open.
+app.post('/api/devices/:id/sessions', requireAuth, requirePerm('devices', 'connect'), (req, res) => {
+  const d = db.find('devices', req.params.id);
+  if (!d) return bad(res, 'Device not found', 404);
+  if (d.active === false) return bad(res, 'This device is retired');
+  const mode = ['desktop', 'terminal', 'files'].includes(req.body?.mode) ? req.body.mode : 'desktop';
+  const { url, error } = remote.connectUrl(d, mode);
+  if (error) return bad(res, error);
+  let ticketId = req.body?.ticketId || null;
+  if (ticketId && !db.find('tickets', ticketId)) ticketId = null;
+  const session = db.insert('remoteSessions', {
+    deviceId: d.id, userId: req.user.id, ticketId, mode, startedAt: db.now(), endedAt: null, minutes: 0, notes: '',
+  });
+  db.log('audit', { userId: req.user.id, action: 'remote.start', target: `${d.name} (${mode})` });
+  res.json({ session: sessionOut(session), url, embed: settings().remote?.embed !== false });
+});
+
+function ownSession(req, res) {
+  const x = db.find('remoteSessions', req.params.id);
+  if (!x) { bad(res, 'Session not found', 404); return null; }
+  if (x.userId !== req.user.id && !can(req.user, 'devices', 'edit')) { bad(res, 'This is another engineer’s session', 403); return null; }
+  return x;
+}
+
+app.get('/api/remote-sessions/:id', requireAuth, requirePerm('devices', 'view'), (req, res) => {
+  const x = db.find('remoteSessions', req.params.id);
+  if (!x) return bad(res, 'Session not found', 404);
+  const d = db.find('devices', x.deviceId);
+  const link = d && !x.endedAt && x.userId === req.user.id ? remote.connectUrl(d, x.mode) : {};
+  res.json({ session: sessionOut(x), device: d ? deviceOut(d) : null, url: link.url || null, embed: settings().remote?.embed !== false });
+});
+app.put('/api/remote-sessions/:id', requireAuth, requirePerm('devices', 'connect'), (req, res) => {
+  const x = ownSession(req, res);
+  if (!x) return;
+  if ('notes' in (req.body || {})) x.notes = String(req.body.notes || '').slice(0, 2000);
+  if ('ticketId' in (req.body || {})) x.ticketId = db.find('tickets', req.body.ticketId) ? req.body.ticketId : null;
+  db.save();
+  res.json(sessionOut(x));
+});
+app.post('/api/remote-sessions/:id/end', requireAuth, requirePerm('devices', 'connect'), (req, res) => {
+  const x = ownSession(req, res);
+  if (!x) return;
+  if (req.body && 'ticketId' in req.body) x.ticketId = db.find('tickets', req.body.ticketId) ? req.body.ticketId : null;
+  const wasOpen = !x.endedAt;
+  remote.endSession(x, req.body?.notes);
+  if (wasOpen) db.log('audit', { userId: req.user.id, action: 'remote.end', target: `${sessionOut(x).deviceName} (${x.minutes} min)` });
+  res.json(sessionOut(x));
 });
 
 // ---------- forms ----------
@@ -531,7 +648,7 @@ app.post('/api/email-accounts/:id/poll', requireAuth, requirePerm('email', 'edit
 app.post('/api/email-accounts/:id/send-test', requireAuth, requirePerm('email', 'edit'), async (req, res) => {
   const a = db.find('emailAccounts', req.params.id);
   if (!a || a.direction !== 'outbound') return bad(res, 'Outbound channel not found', 404);
-  await email.sendMail({ accountId: a.id, to: req.body?.to || req.user.email, subject: 'Test email from Time Management and ITSM', text: 'Your outbound email channel is working.' });
+  await email.sendMail({ accountId: a.id, to: req.body?.to || req.user.email, subject: 'Test email from OpsTrack', text: 'Your outbound email channel is working.' });
   const last = db.all('emailLog')[0];
   if (last?.status === 'sent') return res.json({ ok: true, message: `Test email sent to ${last.to}` });
   bad(res, `Send failed: ${last?.detail || 'unknown error'}`);
@@ -571,6 +688,13 @@ app.put('/api/settings', requireAuth, requirePerm('settings', 'edit'), (req, res
   const b = req.body || {};
   const listKeys = ['activityCategories', 'ticketCategories', 'ticketPriorities', 'ticketStatuses', 'closedStatuses'];
   const patch = pick(b, ['companyName', 'ticketPrefix', 'workloadGreenMax', 'dailyTargetHours', 'slaHours', 'notifyOnAssign', 'notifyRequesterOnCreate', ...listKeys]);
+  if (b.remote && typeof b.remote === 'object') {
+    const r = pick(b.remote, ['provider', 'serverUrl', 'embed', 'guacDataSource', 'urlTemplate', 'logToTracker', 'trackerCategory']);
+    if ('provider' in r && r.provider && !remote.PROVIDERS[r.provider]) return bad(res, 'Unknown remote desktop provider');
+    if (r.serverUrl && !/^https?:\/\/[^\s]+$/i.test(String(r.serverUrl).trim())) return bad(res, 'Server address must start with http:// or https://');
+    if (r.urlTemplate && !/^https?:\/\//i.test(String(r.urlTemplate).trim())) return bad(res, 'URL template must start with http:// or https://');
+    patch.remote = { ...settings().remote, ...r, embed: r.embed !== false, logToTracker: r.logToTracker !== false };
+  }
   for (const k of listKeys) if (k in patch) patch[k] = (Array.isArray(patch[k]) ? patch[k] : String(patch[k]).split(',')).map((x) => String(x).trim()).filter(Boolean);
   if (patch.ticketPrefix) patch.ticketPrefix = patch.ticketPrefix.toUpperCase().replace(/[^A-Z0-9]/g, '') || 'INC';
   Object.assign(db.state.settings, patch);
@@ -689,7 +813,7 @@ if (require.main === module) {
   db.load().then(() => {
     seed();
     app.listen(PORT, () => {
-      console.log(`Time Management and ITSM running at http://localhost:${PORT} (storage: ${process.env.DATABASE_URL ? 'PostgreSQL' : 'file'})`);
+      console.log(`OpsTrack running at http://localhost:${PORT} (storage: ${process.env.DATABASE_URL ? 'PostgreSQL' : 'file'})`);
       workflow.startScheduler();
       email.startInboundPolling();
     });

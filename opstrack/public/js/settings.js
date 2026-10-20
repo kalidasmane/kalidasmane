@@ -7,6 +7,7 @@
     { id: 'forms', label: 'Forms', icon: 'form', perm: 'forms' },
     { id: 'email', label: 'Email (Inbound / Outbound)', icon: 'mail', perm: 'email' },
     { id: 'workflows', label: 'Workflow Automation', icon: 'flow', perm: 'workflows' },
+    { id: 'remote', label: 'Remote Desktop', icon: 'monitor', perm: 'settings' },
     { id: 'general', label: 'General', icon: 'sliders', perm: 'settings' },
     { id: 'audit', label: 'Audit log', icon: 'list', perm: 'settings' },
   ];
@@ -69,7 +70,7 @@
   async function profilesTab(el) {
     const profiles = await App.get('/api/profiles');
     const mods = App.meta.modules;
-    const ACT_LABEL = { view: 'View', create: 'Create', edit: 'Modify', delete: 'Delete', viewAll: 'See everyone', assign: 'Assign' };
+    const ACT_LABEL = { view: 'View', create: 'Create', edit: 'Modify', delete: 'Delete', viewAll: 'See everyone', assign: 'Assign', connect: 'Connect' };
     function profileModal(p = {}, clone = false) {
       const perms = p.permissions || {};
       const locked = p.system && !clone;
@@ -450,12 +451,62 @@
     });
   }
 
+  // ================= REMOTE DESKTOP =================
+  async function remoteTab(el) {
+    const s = await App.get('/api/settings');
+    const r = s.remote || {};
+    const providers = App.meta.remoteProviders;
+    const canEdit = App.can('settings', 'edit');
+    el.innerHTML = `<form class="card settings-form" id="rf">
+      <p class="muted">Engineers open remote desktop, terminal and file sessions to devices from <b>Devices &amp; Remote</b>. OpsTrack connects to a remote-management server you run. Each session is logged, and its time goes into the engineer's Daily Tracker.</p>
+      <div class="form-grid">
+        <label class="span2">Remote management server<select name="provider">${App.options(Object.entries(providers).map(([k, v]) => ({ value: k, label: v.label })), r.provider, { blank: '— Not connected —' })}</select></label>
+        <label class="span2" data-p="meshcentral guacamole">Server address<input name="serverUrl" value="${esc(r.serverUrl || '')}" placeholder="https://mesh.yourcompany.com"></label>
+        <label data-p="guacamole">Guacamole data source<input name="guacDataSource" value="${esc(r.guacDataSource || 'mysql')}" placeholder="mysql, postgresql, sqlserver or default"></label>
+        <label class="span2" data-p="custom">URL template <small class="muted">placeholders: {id} {host} {name} {mode}</small><input name="urlTemplate" value="${esc(r.urlTemplate || '')}" placeholder="https://remote.yourcompany.com/connect?device={id}"></label>
+        <label class="check span2"><input type="checkbox" name="embed" ${r.embed !== false ? 'checked' : ''}> Open sessions inside OpsTrack (embedded). Untick to open them in a new browser tab.</label>
+        <label class="check"><input type="checkbox" name="logToTracker" ${r.logToTracker !== false ? 'checked' : ''}> Log session time to the Daily Tracker</label>
+        <label>Tracker activity type<select name="trackerCategory">${App.options(App.meta.settings.activityCategories, r.trackerCategory || 'Customer Support')}</select></label>
+      </div>
+      <details class="guide" data-p="meshcentral"><summary>How to set up MeshCentral (free, self-hosted)</summary>
+        <ol>
+          <li>On a server that both your engineers and the managed devices can reach, run <code>npm install meshcentral</code> then <code>node node_modules/meshcentral</code>. You can also use the official Docker image.</li>
+          <li>Open the MeshCentral page, create the first (admin) account and a <b>device group</b>. Click <b>Add Agent</b> and install the agent on each Windows, Linux or macOS device. The agent connects out to MeshCentral, so devices behind firewalls work.</li>
+          <li>To show sessions inside OpsTrack, edit <code>meshcentral-data/config.json</code>. In the <code>"settings"</code> section add <code>"allowedFramingOrigins": "https://ops.yourcompany.com"</code> (your OpsTrack address), then restart MeshCentral. This lets only OpsTrack embed it.</li>
+          <li>Run OpsTrack and MeshCentral on <b>HTTPS</b> under the <b>same domain</b>, for example <code>ops.yourcompany.com</code> and <code>mesh.yourcompany.com</code>. Otherwise browsers block MeshCentral's login cookie inside the embedded view. If they are on different domains (for example OpsTrack on <code>onrender.com</code>), untick “Open sessions inside OpsTrack” so sessions open in a new tab.</li>
+          <li>Create a MeshCentral account for each engineer, with rights on the device groups they support. Engineers sign in to MeshCentral once in their browser.</li>
+          <li>In OpsTrack, add each device and paste its node ID. In MeshCentral, open the device and copy the value after <code>gotonode=</code> in the address bar.</li>
+        </ol></details>
+      <details class="guide" data-p="guacamole"><summary>How to set up Apache Guacamole (free, self-hosted)</summary>
+        <ol>
+          <li>Install Guacamole, for example with the official <code>guacamole/guacamole</code> and <code>guacamole/guacd</code> Docker images and a MySQL or PostgreSQL database.</li>
+          <li>Create a connection (RDP, VNC or SSH) for each device under <b>Settings → Connections</b>. The number in the connection's edit address is its connection ID.</li>
+          <li>Set the data source above to match your authentication backend: <code>mysql</code>, <code>postgresql</code> or <code>sqlserver</code>.</li>
+          <li>Host Guacamole on the same domain as OpsTrack to show it embedded, or untick “Open sessions inside OpsTrack”.</li>
+        </ol></details>
+      ${canEdit ? '<footer><button class="btn primary" type="submit">Save remote desktop settings</button></footer>' : ''}
+    </form>`;
+    const f = el.querySelector('#rf');
+    const sync = () => f.querySelectorAll('[data-p]').forEach((x) => { x.hidden = !x.dataset.p.split(' ').includes(f.provider.value); });
+    f.provider.addEventListener('change', sync);
+    sync();
+    if (!canEdit) f.querySelectorAll('input,select').forEach((i) => { i.disabled = true; });
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await App.put('/api/settings', { remote: App.formData(f) });
+        App.toast('Remote desktop settings saved');
+        await App.refreshMeta();
+      } catch (err) { App.fail(err); }
+    });
+  }
+
   async function auditTab(el) {
     const list = await App.get('/api/audit');
     el.innerHTML = `<div class="card">${list.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>When</th><th>User</th><th>Action</th><th>Target</th></tr></thead><tbody>${list.map((a) => `<tr><td>${App.fmtDateTime(a.at)}</td><td>${esc(a.userName || '—')}</td><td><code>${esc(a.action)}</code></td><td>${esc(a.target || '')}</td></tr>`).join('')}</tbody></table></div>` : App.empty('No audit entries')}</div>`;
   }
 
-  const RENDER = { users: usersTab, profiles: profilesTab, forms: formsTab, email: emailTab, workflows: workflowsTab, general: generalTab, audit: auditTab };
+  const RENDER = { users: usersTab, profiles: profilesTab, forms: formsTab, email: emailTab, workflows: workflowsTab, general: generalTab, remote: remoteTab, audit: auditTab };
 
   App.pages.settings = {
     title: 'Settings',

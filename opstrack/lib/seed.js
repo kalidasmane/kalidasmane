@@ -21,6 +21,7 @@ const DEFAULT_PROFILES = [
       dashboard: ['view'], timesheet: ['view', 'create', 'edit', 'delete', 'viewAll'],
       tickets: ['view', 'create', 'edit', 'viewAll', 'assign'], projects: ['view', 'create', 'edit'],
       reports: ['view'], users: ['view'], forms: ['view'], workflows: ['view'],
+      devices: ['view', 'create', 'edit', 'connect'],
     },
   },
   {
@@ -28,7 +29,7 @@ const DEFAULT_PROFILES = [
     description: 'Logs daily effort and works on assigned tickets.',
     permissions: {
       dashboard: ['view'], timesheet: ['view', 'create', 'edit', 'delete'],
-      tickets: ['view', 'create', 'edit'], projects: ['view'],
+      tickets: ['view', 'create', 'edit'], projects: ['view'], devices: ['view', 'connect'],
     },
   },
   {
@@ -36,13 +37,13 @@ const DEFAULT_PROFILES = [
     description: 'Handles customer queries and the service desk queue.',
     permissions: {
       dashboard: ['view'], timesheet: ['view', 'create', 'edit', 'delete'],
-      tickets: ['view', 'create', 'edit', 'viewAll', 'assign'], projects: ['view'],
+      tickets: ['view', 'create', 'edit', 'viewAll', 'assign'], projects: ['view'], devices: ['view', 'connect'],
     },
   },
 ];
 
 const DEFAULT_SETTINGS = {
-  companyName: 'Time Management and ITSM',
+  companyName: 'OpsTrack',
   ticketPrefix: 'INC',
   workloadGreenMax: 3, // 1..greenMax open tickets = available (green); above = busy (red)
   dailyTargetHours: 8,
@@ -54,14 +55,26 @@ const DEFAULT_SETTINGS = {
   slaHours: { Low: 72, Medium: 24, High: 8, Critical: 4 },
   notifyOnAssign: true,
   notifyRequesterOnCreate: true,
+  remote: {
+    provider: '', // meshcentral | guacamole | custom
+    serverUrl: '',
+    embed: true, // open sessions inside OpsTrack (iframe) instead of a new tab
+    guacDataSource: 'mysql',
+    urlTemplate: '',
+    logToTracker: true,
+    trackerCategory: 'Customer Support',
+  },
 };
 
 function seed() {
   const s = db.state;
   s.settings = { ...DEFAULT_SETTINGS, ...s.settings };
+  s.settings.remote = { ...DEFAULT_SETTINGS.remote, ...s.settings.remote };
   if (!db.all('profiles').length) {
     for (const p of DEFAULT_PROFILES) db.insert('profiles', p);
   }
+  // The Administrator profile always has every permission, including modules added later.
+  for (const p of db.all('profiles')) if (p.system) p.permissions = allPerms();
   if (!db.all('users').length) {
     const admin = db.all('profiles').find((p) => p.key === 'admin');
     db.insert('users', {

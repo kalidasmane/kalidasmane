@@ -1,4 +1,4 @@
-# Render Blueprint: deploys the Time Management and ITSM app on Render's free plan.
+# Render Blueprint: deploys the OpsTrack app on Render's free plan.
 # Render dashboard → New → Blueprint → pick this repository.
 #
 # The free plan has no persistent disk, so data is kept in PostgreSQL instead:
@@ -6,9 +6,9 @@
 # string as DATABASE_URL when Render asks for it.
 services:
   - type: web
-    name: time-management-itsm
+    name: opstrack
     runtime: node
-    rootDir: time-management-itsm
+    rootDir: opstrack
     plan: free
     buildCommand: npm ci --omit=dev
     startCommand: node server.js

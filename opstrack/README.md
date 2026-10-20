@@ -1,4 +1,6 @@
-# Time Management and ITSM
+# OpsTrack
+
+**Time tracking and IT service management (ITSM) for engineering and support teams.**
 
 A self-hosted web application for engineering and support teams that combines:
 
@@ -15,6 +17,11 @@ A self-hosted web application for engineering and support teams that combines:
   date range, engineer and project; show/hide widgets per user.
 - **Tickets (ITSM)** – service-desk queue with priorities, SLA due dates,
   conversation, internal notes, history and time logging against tickets.
+- **Devices & Remote** – inventory of PCs, servers and network devices, with one-click
+  **remote desktop, terminal and file sessions** through MeshCentral or Apache Guacamole.
+  Sessions open inside OpsTrack with a timer and notes. When an engineer ends a session,
+  its time is logged to their Daily Tracker, linked to the ticket and project.
+  See [Remote management](#remote-management).
 - **Projects** – create / modify / delete projects with code, client,
   manager, budget hours and auto-detect keywords; project page shows effort by
   engineer and activity.
@@ -65,16 +72,49 @@ the dot immediately.
 Requires Node.js 18+.
 
 ```bash
-cd time-management-itsm
+cd opstrack
 npm install
-npm run demo     # optional: sample engineers, projects, 3 weeks of entries, tickets, workflows
+npm run demo     # optional: sample team, roles, projects, ticket types, tickets, 3 weeks of entries
 npm start        # http://localhost:3000
 ```
 
 Sign in with **username `admin`, password `admin`**. Change the password from
-the user menu after the first sign-in. Demo users (if you ran `npm run demo`):
-`priya`, `rahul` (managers), `amit`, `sneha`, `vikram` (engineers), `neha`,
-`arjun` (support), all with password `Welcome@123`.
+the user menu after the first sign-in.
+
+#### Demo data (`npm run demo`)
+
+The demo script loads a realistic sample organisation. It runs only on an empty database.
+
+| What | Count | Examples |
+|------|-------|----------|
+| Team members | 15 | managers, team leads, engineers, L1/L2 support, intern, auditor |
+| Roles (profiles) | 13 | Administrator, Manager, Project Manager, Team Lead, Engineer, Cloud / DevOps Engineer, Network Engineer, Security Analyst, L2 Support Engineer, Support Agent, Customer Success, Intern, Auditor (read-only) |
+| Projects | 13 | Cloud Migration, ERP Upgrade, Network Refresh, SD-WAN Deployment, Kubernetes Platform, SIEM Implementation (Planned), Backup Modernisation (On Hold), CRM Integration (Completed)… |
+| Ticket types | 12 | Incident, Service Request, Problem, Change Request, Access Request, Hardware, Software Installation, Network, Security, Email & Collaboration, Password Reset, Query |
+| Tickets | 15 | spread over every status, priority and channel (web, email, form, portal, automation) |
+| Tracker entries | ~1,200 | 3 weeks of project work, customer support, meetings and training |
+| Devices | 12 | laptops, servers, VMs, firewall, switch, printer (one retired), with 6 past remote sessions |
+| Workflows | 4 | critical-incident auto-assign, VPN/network routing, security routing, daily health-check ticket |
+
+All demo users have the password `Welcome@123`:
+
+| Username | Name | Role | Reports to |
+|----------|------|------|------------|
+| `priya` | Priya Sharma | Manager – Engineering | admin |
+| `rahul` | Rahul Verma | Manager – Service Desk | admin |
+| `anjali` | Anjali Desai | Project Manager | admin |
+| `karan` | Karan Singh | Team Lead – Cloud | priya |
+| `meera` | Meera Iyer | Team Lead – Service Desk | rahul |
+| `amit` | Amit Patil | Engineer | karan |
+| `sneha` | Sneha Kulkarni | Cloud / DevOps Engineer | karan |
+| `sameer` | Sameer Khan | Cloud / DevOps Engineer | karan |
+| `vikram` | Vikram Rao | Network Engineer | priya |
+| `rohan` | Rohan Gupta | Security Analyst | priya |
+| `pooja` | Pooja Nair | L2 Support Engineer | meera |
+| `neha` | Neha Joshi | Support Agent (L1) – has 4 open tickets, so shows the red “busy” light | meera |
+| `arjun` | Arjun Mehta | Support Agent (L1) | meera |
+| `fatima` | Fatima Shaikh | Intern | amit |
+| `lakshmi` | Lakshmi Rao | Auditor (read-only) | admin |
 
 Environment variables:
 
@@ -104,7 +144,7 @@ PostgreSQL database instead. Neither service needs a payment card.
    - `ADMIN_PASSWORD`: choose the password for the `admin` account. If you leave it blank,
      the password is `admin`, which anyone could guess on a public site.
 4. Click **Apply**. After the build, Render shows the address, for example
-   `https://time-management-itsm.onrender.com`.
+   `https://opstrack.onrender.com`.
 
 Free-plan behaviour: the app goes to sleep after 15 minutes without visitors.
 The next visit wakes it in about a minute. Your data is not affected.
@@ -115,7 +155,7 @@ If Supabase rejects the connection with a certificate error, add the variable
 To load sample data into the hosted database, run this from a computer that has a copy of the repository:
 
 ```bash
-cd time-management-itsm
+cd opstrack
 npm install
 DATABASE_URL='<your connection string>' npm run demo
 ```
@@ -126,10 +166,10 @@ For permanent file storage instead of PostgreSQL, change `plan: free` to
 ### Docker (any cloud VM, Azure, AWS, on-premises server)
 
 ```bash
-cd time-management-itsm
-docker build -t time-management-itsm .
-docker run -d --name itsm -p 3000:3000 -v itsm-data:/data \
-  -e ADMIN_PASSWORD='choose-a-strong-password' time-management-itsm
+cd opstrack
+docker build -t opstrack .
+docker run -d --name opstrack -p 3000:3000 -v opstrack-data:/data \
+  -e ADMIN_PASSWORD='choose-a-strong-password' opstrack
 ```
 
 Put it behind HTTPS (nginx, Caddy, IIS, or your cloud's load balancer).
@@ -140,6 +180,50 @@ Put it behind HTTPS (nginx, Caddy, IIS, or your cloud's load balancer).
 | `DATABASE_URL` | – | PostgreSQL connection string. When set, data is stored there instead of `DATA_DIR` |
 | `DATABASE_SSL_VERIFY` | `true` | Set to `false` if the database uses a certificate Node.js can't verify |
 | `TRUST_PROXY` | `1` | Number of reverse proxies in front of the app; set to `0` when exposed directly |
+
+## Remote management
+
+Engineers start remote sessions from **Devices & Remote**, or from a ticket that has a device
+linked. OpsTrack doesn't stream screens itself. It connects to a free, self-hosted
+remote-management server that you run:
+
+| Server | What engineers get | Device ID to enter in OpsTrack |
+|--------|--------------------|-------------------------------|
+| **MeshCentral** (recommended) | Remote desktop, terminal and file transfer for Windows, Linux and macOS. A small agent connects out to MeshCentral, so devices behind firewalls and NAT work. | The node ID. In MeshCentral, open the device and copy the value after `gotonode=` in the address bar. |
+| **Apache Guacamole** | RDP, VNC and SSH in the browser, with no agent on the device. Guacamole must be able to reach each device. | The connection ID shown in Guacamole's connection settings. |
+| **Other tool** | Any tool that can open a device from a URL. | Whatever your URL template's `{id}` expects. |
+
+**Setting up MeshCentral**
+1. Install it on a server that engineers and devices can reach:
+   `npm install meshcentral && node node_modules/meshcentral`. The official Docker image also works.
+2. Create the admin account and a device group. Install the agent on each device from **Add Agent**.
+3. To show sessions inside OpsTrack, add this to `meshcentral-data/config.json` and restart:
+   ```json
+   { "settings": { "allowedFramingOrigins": "https://ops.yourcompany.com" } }
+   ```
+   This lets only your OpsTrack address embed MeshCentral.
+4. Serve OpsTrack and MeshCentral over **HTTPS on the same domain**, for example
+   `ops.yourcompany.com` and `mesh.yourcompany.com`. MeshCentral's login cookie is `SameSite=Lax`,
+   so browsers don't send it to an embedded view from another site. If the two run on different
+   domains (for example OpsTrack on `onrender.com`), untick **Open sessions inside OpsTrack** in
+   Settings → Remote Desktop, and sessions open in a new tab instead.
+5. Give each engineer a MeshCentral account with rights on their device groups. They sign in to
+   MeshCentral once in their browser.
+6. In OpsTrack: **Settings → Remote Desktop**, choose MeshCentral, enter the server address, then
+   add devices with their node IDs.
+
+**How sessions are recorded**
+- **Start:** clicking Remote desktop, Terminal or Files creates a session record (engineer, device,
+  ticket, start time) and adds an entry to the audit log.
+- **During:** the session page shows a timer, a ticket selector and a notes box that saves as you type.
+- **End:** *End session & log time* writes a Daily Tracker entry, for example
+  "Remote desktop – GLOBEX-SAP-APP01 (INC-1012)". The entry uses the activity type chosen in
+  settings and links to the device's project and the ticket. Closing the browser also ends the session.
+- **History:** every device shows its session history and the tickets linked to it.
+
+**Permissions** (Profiles → *Devices & Remote*): *View* the inventory, *Create / Modify / Delete*
+devices, and *Connect* to start sessions. Engineers and support agents can view and connect by
+default. Managers can also add and edit devices.
 
 ## Data visibility rules
 
@@ -160,6 +244,7 @@ lib/auth.js          password hashing (scrypt), sessions, presence, permissions
 lib/seed.js          default profiles, admin user, settings, sample form
 lib/tickets.js       ticket service, workload calculation, notifications
 lib/workflow.js      workflow engine + scheduler
+lib/remote.js        remote desktop links (MeshCentral / Guacamole / custom) and session logging
 lib/email.js         SMTP (nodemailer) / IMAP (imapflow) channels
 public/              single-page web app (vanilla JS + Chart.js)
 scripts/seed-demo.js demo data
