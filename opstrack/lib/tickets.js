@@ -3,6 +3,7 @@
 const db = require('./db');
 
 const settings = () => db.state.settings;
+const creating = new Set(); // tickets whose "created" chat notification is still pending
 
 function isClosed(t) {
   return settings().closedStatuses.includes(t.status);
@@ -78,6 +79,10 @@ function create(data, actor, { source = 'web', skipWorkflows = false } = {}) {
   addHistory(t, `Ticket created via ${source}${t.assigneeId ? ` and assigned to ${userName(t.assigneeId)}` : ''}.`, actor);
   if (!skipWorkflows) require('./workflow').run('ticket.created', t, { actor });
   if (t.assigneeId) notifyAssignee(t);
+  // Chat notifications go out after the current call stack, so assignments made by
+  // workflows that run right after creation (email, forms) are included.
+  creating.add(t.id);
+  setImmediate(() => { creating.delete(t.id); require('./notify').ticketEvent('ticket.created', t); });
   if (settings().notifyRequesterOnCreate && t.requesterEmail && source !== 'web') {
     require('./email').sendMail({
       to: t.requesterEmail,
@@ -114,7 +119,10 @@ function update(t, patch, actor, { skipWorkflows = false } = {}) {
   if (!isClosed(t)) t.resolvedAt = null;
   t.updatedAt = db.now();
   addHistory(t, changes.join(' · '), actor);
-  if (before.assigneeId !== t.assigneeId) notifyAssignee(t);
+  if (before.assigneeId !== t.assigneeId) {
+    notifyAssignee(t);
+    if (t.assigneeId && !creating.has(t.id)) require('./notify').ticketEvent('ticket.assigned', t);
+  }
   if (!skipWorkflows) require('./workflow').run('ticket.updated', t, { actor, before });
   db.save();
   return t;

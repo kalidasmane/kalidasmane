@@ -6,6 +6,7 @@
     { id: 'profiles', label: 'Profiles & Permissions', icon: 'shield', perm: 'profiles' },
     { id: 'forms', label: 'Forms', icon: 'form', perm: 'forms' },
     { id: 'email', label: 'Email (Inbound / Outbound)', icon: 'mail', perm: 'email' },
+    { id: 'notifications', label: 'Teams & WhatsApp', icon: 'chat', perm: 'notifications' },
     { id: 'workflows', label: 'Workflow Automation', icon: 'flow', perm: 'workflows' },
     { id: 'remote', label: 'Remote Desktop', icon: 'monitor', perm: 'settings' },
     { id: 'general', label: 'General', icon: 'sliders', perm: 'settings' },
@@ -302,6 +303,10 @@
         case 'add_comment': return `<label class="span2">Text<textarea data-k="text" rows="2">${esc(a.text || '')}</textarea></label><label class="check"><input type="checkbox" data-k="internal" ${a.internal !== false ? 'checked' : ''}> Internal note</label>`;
         case 'send_email': return `<label>Recipient<select data-k="to">${App.options([{ value: 'requester', label: 'Requester' }, { value: 'assignee', label: 'Assignee' }, { value: 'manager', label: 'Assignee’s reporting manager' }, { value: 'custom', label: 'Custom address' }], a.to || 'requester')}</select></label>
           <label>Custom address<input data-k="address" value="${esc(a.address || '')}"></label><label class="span2">Subject<input data-k="subject" value="${esc(a.subject || '[{{ticket.number}}] {{ticket.subject}}')}"></label><label class="span2">Body<textarea data-k="body" rows="3">${esc(a.body || 'Ticket {{ticket.number}} – {{ticket.subject}}\nPriority: {{ticket.priority}}\nAssignee: {{assignee.name}}')}</textarea></label>`;
+        case 'notify_channel': return App.meta.notifyChannels?.length
+          ? `<label>Channel<select data-k="channelId">${App.options(App.meta.notifyChannels.map((c) => ({ value: c.id, label: `${c.name} (${App.meta.notifyMeta.types[c.type]})` })), a.channelId)}</select></label>
+            <label class="span2">Extra text (optional)<input data-k="text" value="${esc(a.text || '')}" placeholder="e.g. Please pick this up within 15 minutes"></label>`
+          : '<p class="muted span2">No Teams / WhatsApp channels yet – add one under Settings → Teams &amp; WhatsApp.</p>';
         case 'create_ticket': return `<label class="span2">Subject<input data-k="subject" value="${esc(a.subject || '')}" placeholder="e.g. Weekly backup verification – {{date}}"></label>
           <label class="span2">Description<textarea data-k="description" rows="2">${esc(a.description || '')}</textarea></label>
           <label>Priority<select data-k="priority">${App.options(s.ticketPriorities, a.priority || 'Medium')}</select></label><label>Category<select data-k="category">${App.options(s.ticketCategories, a.category)}</select></label>
@@ -501,12 +506,106 @@
     });
   }
 
+  // ================= TEAMS & WHATSAPP =================
+  async function notificationsTab(el) {
+    const [{ channels, log }, s] = await Promise.all([App.get('/api/notify-channels'), App.get('/api/settings')]);
+    const nm = App.meta.notifyMeta;
+    const prios = App.meta.settings.ticketPriorities;
+    const fieldHelp = Object.entries(nm.templateFields).map(([k, v]) => `<code>${k}</code> ${esc(v)}`).join(' · ');
+    function channelModal(c = { type: 'teams', enabled: true, events: ['ticket.created'], priorities: [], messageMode: 'template', templateLanguage: 'en', templateFields: 'number,subject,priority,assignee' }) {
+      App.modal({
+        title: c.id ? `Edit channel – ${c.name}` : 'Add Teams / WhatsApp channel',
+        wide: true,
+        body: `<div class="form-grid">
+          <label>Channel name<input name="name" value="${esc(c.name || '')}" placeholder="e.g. Service desk Teams channel" required></label>
+          <label>Type<select name="type">${App.options(Object.entries(nm.types).map(([v, l]) => ({ value: v, label: l })), c.type)}</select></label>
+          <div class="span2" data-ct="teams">
+            <label>Teams webhook address<input name="webhookUrl" value="${esc(c.webhookUrl || '')}" placeholder="https://….webhook.office.com/… or https://….logic.azure.com/…" autocomplete="off"></label>
+            <p class="hint">In Teams: open the channel → <b>⋯ → Workflows</b> → “Post to a channel when a webhook request is received” → copy the address. The older <b>Connectors → Incoming Webhook</b> address also works.</p>
+          </div>
+          <div class="span2 grid2" data-ct="whatsapp_meta">
+            <label>Phone number ID<input name="phoneNumberId" value="${esc(c.phoneNumberId || '')}" placeholder="from Meta → WhatsApp → API Setup"></label>
+            <label>Access token<input type="password" name="accessToken" value="${esc(c.accessToken || '')}" placeholder="permanent system-user token" autocomplete="new-password"></label>
+          </div>
+          <div class="span2 grid2" data-ct="whatsapp_twilio">
+            <label>Account SID<input name="accountSid" value="${esc(c.accountSid || '')}" placeholder="AC…"></label>
+            <label>Auth token<input type="password" name="authToken" value="${esc(c.authToken || '')}" autocomplete="new-password"></label>
+            <label>WhatsApp sender number<input name="fromNumber" value="${esc(c.fromNumber || '')}" placeholder="+14155238886"></label>
+          </div>
+          <div class="span2 grid2" data-ct="whatsapp_meta whatsapp_twilio">
+            <label class="span2">Send to (WhatsApp numbers, international format, one per line or comma-separated)<textarea name="recipients" rows="2" placeholder="+91 98123 45678&#10;+44 7700 900123">${esc(c.recipients || '')}</textarea></label>
+            <label class="check span2"><input type="checkbox" name="notifyAssignee" ${c.notifyAssignee ? 'checked' : ''}> Also send to the assigned engineer (phone number from their user profile)</label>
+            <label>Message type<select name="messageMode">${App.options([{ value: 'template', label: 'Approved template (required to start conversations)' }, { value: 'text', label: 'Plain text (only inside a 24-hour customer-service window)' }], c.messageMode || 'template')}</select></label>
+            <label data-ct="whatsapp_meta" data-mode="template">Template name<input name="templateName" value="${esc(c.templateName || '')}" placeholder="new_ticket_alert"></label>
+            <label data-ct="whatsapp_meta" data-mode="template">Template language<input name="templateLanguage" value="${esc(c.templateLanguage || 'en')}" placeholder="en, en_US, hi"></label>
+            <label data-ct="whatsapp_twilio" data-mode="template">Content template SID<input name="contentSid" value="${esc(c.contentSid || '')}" placeholder="HX…"></label>
+            <label class="span2" data-mode="template">Template variables {{1}}, {{2}}, … in order<input name="templateFields" value="${esc(c.templateFields || 'number,subject,priority,assignee')}"><small class="muted">${fieldHelp}</small></label>
+          </div>
+          <fieldset class="span2"><legend>Send when</legend>
+            ${Object.entries(nm.events).map(([v, l]) => `<label class="check inline"><input type="checkbox" data-ev value="${v}" ${(c.events || []).includes(v) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}
+            <div class="row" style="margin-top:8px"><small class="muted">Only these priorities (none ticked = all):</small> ${prios.map((p) => `<label class="check inline"><input type="checkbox" data-pr value="${esc(p)}" ${(c.priorities || []).includes(p) ? 'checked' : ''}> ${esc(p)}</label>`).join('')}</div>
+          </fieldset>
+          <label class="check"><input type="checkbox" name="enabled" ${c.enabled !== false ? 'checked' : ''}> Enabled</label>
+        </div>`,
+        onOpen: (form) => {
+          const sync = () => {
+            const t = form.type.value; const mode = form.messageMode.value;
+            const forType = (x) => !x.dataset.ct || x.dataset.ct.split(' ').includes(t);
+            form.querySelectorAll('[data-ct], [data-mode]').forEach((x) => { x.hidden = !forType(x) || (x.dataset.mode && x.dataset.mode !== mode); });
+          };
+          form.type.addEventListener('change', sync);
+          form.messageMode.addEventListener('change', sync);
+          sync();
+        },
+        onSubmit: async (f, form) => {
+          f.events = [...form.querySelectorAll('[data-ev]:checked')].map((x) => x.value);
+          f.priorities = [...form.querySelectorAll('[data-pr]:checked')].map((x) => x.value);
+          if (!f.events.length) throw new Error('Choose at least one event');
+          if (c.id) await App.put(`/api/notify-channels/${c.id}`, f); else await App.post('/api/notify-channels', f);
+          App.toast('Channel saved');
+          await App.refreshMeta();
+          App.render();
+        },
+      });
+    }
+    const canEdit = App.can('notifications', 'edit');
+    el.innerHTML = `<form class="card settings-form compact" id="pub">
+        <label>OpsTrack web address <small class="muted">(used for “Open ticket” links in Teams and WhatsApp)</small>
+          <div class="row"><input name="publicUrl" value="${esc(s.publicUrl || location.origin)}" class="grow" ${App.can('settings', 'edit') ? '' : 'disabled'}>${App.can('settings', 'edit') ? '<button class="btn" type="submit">Save</button>' : ''}</div></label>
+      </form>
+      <div class="toolbar"><p class="muted">Post new and assigned tickets to Microsoft Teams channels and WhatsApp. Channels can also be used by workflows (action “Send a Teams / WhatsApp message”).</p><span class="grow"></span>
+        ${App.can('notifications', 'create') ? `<button class="btn primary" id="new">${icon('plus', 16)} Add channel</button>` : ''}</div>
+      <div class="card">${channels.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Channel</th><th>Type</th><th>Sends when</th><th>Priorities</th><th>Status</th><th></th><th></th></tr></thead><tbody>
+        ${channels.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.type !== 'teams' ? `<small class="muted">${esc(String(c.recipients || '').split(/[\n,;]+/).filter((x) => x.trim()).length)} number(s)${c.notifyAssignee ? ' + assignee' : ''} · ${c.messageMode === 'text' ? 'plain text' : 'template'}</small>` : ''}</td>
+          <td>${esc(nm.types[c.type] || c.type)}</td><td>${(c.events || []).map((e) => `<span class="tag ghost">${esc(nm.events[e] || e)}</span>`).join('')}</td>
+          <td>${(c.priorities || []).length ? c.priorities.map((p) => App.priorityPill(p)).join(' ') : '<span class="muted">all</span>'}</td>
+          <td>${c.enabled ? '<span class="pill st-resolved">Enabled</span>' : '<span class="pill st-closed">Disabled</span>'}</td>
+          <td>${canEdit ? `<button class="btn sm ghost" data-test="${c.id}">Send test</button>` : ''}</td>${actionBtns('notifications', c.id)}</tr>`).join('')}
+      </tbody></table></div>` : App.empty('No channels yet', 'Add a Microsoft Teams channel or WhatsApp numbers to be told about new tickets.')}</div>
+      <section class="card"><header><h3>Delivery log</h3></header>${log.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>When</th><th>Channel</th><th>Event</th><th>Ticket</th><th>Result</th></tr></thead><tbody>
+        ${log.map((l) => `<tr><td>${App.fmtDateTime(l.at)}</td><td>${esc(l.channel)}</td><td>${esc(nm.events[l.event] || { workflow: 'Workflow', test: 'Test message' }[l.event] || l.event)}</td><td>${esc(l.ticket || '—')}</td><td><span class="pill ${l.status === 'sent' ? 'st-resolved' : 'prio-critical'}">${esc(l.status)}</span> <small class="muted">${esc(l.detail || '')}</small></td></tr>`).join('')}
+      </tbody></table></div>` : '<p class="muted pad">Nothing sent yet.</p>'}</section>`;
+    el.querySelector('#pub').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try { await App.put('/api/settings', { publicUrl: e.target.publicUrl.value.trim() }); App.toast('Address saved'); } catch (err) { App.fail(err); }
+    });
+    el.querySelector('#new')?.addEventListener('click', () => channelModal());
+    el.querySelectorAll('[data-test]').forEach((b) => b.addEventListener('click', async () => {
+      b.disabled = true; const t = b.textContent; b.textContent = 'Sending…';
+      try { const r = await App.post(`/api/notify-channels/${b.dataset.test}/test`); App.toast(r.message); } catch (err) { App.fail(err); } finally { b.disabled = false; b.textContent = t; App.render(); }
+    }));
+    bindRows(el, channels, channelModal, async (c) => {
+      if (!await App.confirm('Delete channel', `Delete “${c.name}”? Workflows using it will skip it.`)) return;
+      try { await App.del(`/api/notify-channels/${c.id}`); App.toast('Channel deleted'); await App.refreshMeta(); App.render(); } catch (err) { App.fail(err); }
+    });
+  }
+
   async function auditTab(el) {
     const list = await App.get('/api/audit');
     el.innerHTML = `<div class="card">${list.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>When</th><th>User</th><th>Action</th><th>Target</th></tr></thead><tbody>${list.map((a) => `<tr><td>${App.fmtDateTime(a.at)}</td><td>${esc(a.userName || '—')}</td><td><code>${esc(a.action)}</code></td><td>${esc(a.target || '')}</td></tr>`).join('')}</tbody></table></div>` : App.empty('No audit entries')}</div>`;
   }
 
-  const RENDER = { users: usersTab, profiles: profilesTab, forms: formsTab, email: emailTab, workflows: workflowsTab, general: generalTab, remote: remoteTab, audit: auditTab };
+  const RENDER = { users: usersTab, profiles: profilesTab, forms: formsTab, email: emailTab, workflows: workflowsTab, general: generalTab, remote: remoteTab, notifications: notificationsTab, audit: auditTab };
 
   App.pages.settings = {
     title: 'Settings',

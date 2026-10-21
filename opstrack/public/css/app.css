@@ -385,6 +385,7 @@ legend { font-size: 12.5px; font-weight: 600; color: var(--text-2); padding: 0 6
 
 /* ---------- settings ---------- */
 .settings-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 20px; align-items: start; }
+.settings-layout > * { min-width: 0; }
 .settings-nav { display: grid; gap: 2px; position: sticky; top: 80px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 8px; }
 .settings-nav a { display: flex; gap: 9px; align-items: center; padding: 9px 11px; border-radius: 8px; color: var(--text-2); font-weight: 500; }
 .settings-nav a:hover { background: var(--surface-2); }
@@ -423,6 +424,8 @@ legend { font-size: 12.5px; font-weight: 600; color: var(--text-2); padding: 0 6
 .switch input:checked + i { background: #22c55e; }
 .switch input:checked + i::after { transform: translateX(18px); }
 .settings-form { padding: 20px; }
+.settings-form.compact { padding: 14px 20px; }
+.settings-form.compact .row input { min-width: 0; }
 .settings-form footer { margin-top: 18px; display: flex; justify-content: flex-end; }
 
 /* ---------- forms in modals ---------- */
