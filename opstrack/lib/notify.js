@@ -1,4 +1,4 @@
-// Chat notifications: Microsoft Teams (channel webhook / Workflows) and WhatsApp
+// Chat notifications: Microsoft Teams (channel webhook / Workflows), Slack (incoming webhook) and WhatsApp
 // (Meta WhatsApp Cloud API or Twilio). Channels subscribe to ticket events and are
 // also usable from workflows. Sends are asynchronous and never throw.
 const db = require('./db');
@@ -10,6 +10,7 @@ const EVENTS = {
 
 const TYPES = {
   teams: 'Microsoft Teams',
+  slack: 'Slack',
   whatsapp_meta: 'WhatsApp – Meta Cloud API',
   whatsapp_twilio: 'WhatsApp – Twilio',
 };
@@ -88,6 +89,32 @@ async function post(url, init) {
   return body;
 }
 
+// Slack incoming-webhook message using Block Kit, with a plain-text fallback for notifications.
+function slackEscape(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function slackMessage(ch, f, extra) {
+  const critical = f.priority === 'Critical';
+  const mention = ch.mentionCritical && critical ? '<!here> ' : '';
+  const field = (title, value) => ({ type: 'mrkdwn', text: `*${title}*\n${slackEscape(value || '—')}` });
+  const blocks = [
+    { type: 'header', text: { type: 'plain_text', text: `${f.event}: ${f.number}`.slice(0, 150), emoji: true } },
+    { type: 'section', text: { type: 'mrkdwn', text: `${mention}*${slackEscape(f.subject)}*` } },
+    { type: 'section', fields: [field('Priority', f.priority), field('Category', f.category), field('Status', f.status), field('Requester', f.requester), field('Assignee', f.assignee)] },
+  ];
+  if (extra) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: slackEscape(extra).slice(0, 2900) } });
+  if (f.link) {
+    blocks.push({ type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Open ticket' }, url: f.link, ...(critical ? { style: 'danger' } : { style: 'primary' }) }] });
+  }
+  return { text: `${mention}${slackEscape(`${f.event}: ${f.number} – ${f.subject} (${f.priority})`)}`, blocks };
+}
+
+async function sendSlack(ch, f, extra) {
+  await post(ch.webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(slackMessage(ch, f, extra)) });
+  return 'posted to Slack';
+}
+
 async function sendTeams(ch, f, extra) {
   await post(ch.webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(teamsCard(f, extra)) });
   return 'posted to Teams';
@@ -132,6 +159,7 @@ async function send(ch, facts, { ticket = null, extra = '', event = 'manual' } =
   try {
     let detail;
     if (ch.type === 'teams') detail = await sendTeams(ch, facts, extra);
+    else if (ch.type === 'slack') detail = await sendSlack(ch, facts, extra);
     else {
       const to = recipients(ch, ticket);
       if (!to.length) throw new Error('No valid WhatsApp numbers (use international format, e.g. +919812345678)');

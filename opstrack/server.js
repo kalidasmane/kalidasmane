@@ -657,10 +657,10 @@ app.post('/api/email-accounts/:id/send-test', requireAuth, requirePerm('email', 
   bad(res, `Send failed: ${last?.detail || 'unknown error'}`);
 });
 
-// ---------- Teams & WhatsApp notification channels ----------
+// ---------- chat notification channels (Teams, Slack, WhatsApp) ----------
 const NOTIFY_FIELDS = ['name', 'type', 'enabled', 'events', 'priorities', 'webhookUrl', 'phoneNumberId', 'accessToken',
   'accountSid', 'authToken', 'fromNumber', 'recipients', 'notifyAssignee', 'messageMode', 'templateName',
-  'templateLanguage', 'contentSid', 'templateFields'];
+  'templateLanguage', 'contentSid', 'templateFields', 'mentionCritical'];
 
 function cleanChannel(b, existing = {}) {
   const c = pick(b, NOTIFY_FIELDS);
@@ -672,9 +672,10 @@ function cleanChannel(b, existing = {}) {
   if (!m.name) return { error: 'Channel name is required' };
   if (!notify.TYPES[m.type]) return { error: 'Choose a channel type' };
   if (m.type === 'teams' && !/^https?:\/\/\S+$/i.test(m.webhookUrl || '')) return { error: 'Paste the Teams webhook address (https://…)' };
+  if (m.type === 'slack' && !/^https?:\/\/\S+$/i.test(m.webhookUrl || '')) return { error: 'Paste the Slack webhook address (https://hooks.slack.com/services/…)' };
   if (m.type === 'whatsapp_meta' && (!m.phoneNumberId || !m.accessToken)) return { error: 'Phone number ID and access token are required' };
   if (m.type === 'whatsapp_twilio' && (!/^AC\w{32}$/.test(m.accountSid || '') || !m.authToken || !m.fromNumber)) return { error: 'Twilio Account SID (AC…), auth token and WhatsApp sender number are required' };
-  if (m.type !== 'teams' && m.messageMode !== 'text') {
+  if (m.type.startsWith('whatsapp') && m.messageMode !== 'text') {
     if (m.type === 'whatsapp_meta' && !m.templateName) return { error: 'Enter the approved WhatsApp template name (or choose plain-text mode)' };
     if (m.type === 'whatsapp_twilio' && !/^HX\w{32}$/.test(m.contentSid || '')) return { error: 'Enter the Twilio Content template SID (HX…) (or choose plain-text mode)' };
   }

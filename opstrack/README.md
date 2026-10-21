@@ -27,9 +27,9 @@ A self-hosted web application for engineering and support teams that combines:
   engineer and activity.
 - **Reports** – Project × Engineer effort summary and detailed log, CSV export.
 - **Team** – directory and reporting-manager org chart.
-- **Teams & WhatsApp notifications** – new and assigned tickets are posted to Microsoft Teams
+- **Chat notifications** – new and assigned tickets are posted to Microsoft Teams and Slack
   channels and sent on WhatsApp (Meta Cloud API or Twilio), filtered by priority. See
-  [Teams & WhatsApp notifications](#teams--whatsapp-notifications).
+  [Chat notifications](#chat-notifications-teams-slack-whatsapp).
 - **Settings (⚙ gear icon)**
   - **Users** – create, modify, delete, enable/disable, reset password,
     assign **profile** and **reporting manager**.
@@ -184,9 +184,9 @@ Put it behind HTTPS (nginx, Caddy, IIS, or your cloud's load balancer).
 | `DATABASE_SSL_VERIFY` | `true` | Set to `false` if the database uses a certificate Node.js can't verify |
 | `TRUST_PROXY` | `1` | Number of reverse proxies in front of the app; set to `0` when exposed directly |
 
-## Teams & WhatsApp notifications
+## Chat notifications (Teams, Slack, WhatsApp)
 
-**Settings → Teams & WhatsApp** sends a message whenever a ticket is **created** and/or **assigned**.
+**Settings → Chat notifications** sends a message whenever a ticket is **created** and/or **assigned**.
 Each channel can be limited to certain priorities, for example only High and Critical.
 Set **OpsTrack web address** at the top of that page so messages link back to the ticket.
 
@@ -198,6 +198,16 @@ Set **OpsTrack web address** at the top of that page so messages link back to th
 
 The message is an Adaptive Card showing the ticket number, subject, priority, category, status,
 requester and assignee, with an **Open ticket** button.
+
+**Slack**
+1. Go to **api.slack.com/apps → Create New App → From scratch**, choose your workspace, then open
+   **Incoming Webhooks**, switch it on and click **Add New Webhook to Workspace**. Pick the channel.
+2. Copy the `https://hooks.slack.com/services/…` address. In OpsTrack, click **Add channel**,
+   choose type *Slack*, paste the address and click **Send test**.
+
+The message shows the ticket number and subject, the priority, category, status, requester and
+assignee, and an **Open ticket** button (red for Critical tickets). Tick **Mention @here for
+Critical tickets** to alert everyone active in the channel.
 
 **WhatsApp**
 
@@ -222,7 +232,7 @@ Tick **Also send to the assigned engineer** to message the engineer at the phone
 user profile.
 
 Every send is recorded in the **Delivery log** with the provider's error if it failed. Workflows can
-also send to any channel with the action **Send a Teams / WhatsApp message**, with optional extra
+also send to any channel with the action **Send a Teams / Slack / WhatsApp message**, with optional extra
 text that can use `{{ticket.number}}`-style placeholders.
 
 ## Remote management
@@ -290,7 +300,7 @@ lib/auth.js          password hashing (scrypt), sessions, presence, permissions
 lib/seed.js          default profiles, admin user, settings, sample form
 lib/tickets.js       ticket service, workload calculation, notifications
 lib/workflow.js      workflow engine + scheduler
-lib/notify.js        Teams and WhatsApp (Meta / Twilio) notifications
+lib/notify.js        Teams, Slack and WhatsApp (Meta / Twilio) notifications
 lib/remote.js        remote desktop links (MeshCentral / Guacamole / custom) and session logging
 lib/email.js         SMTP (nodemailer) / IMAP (imapflow) channels
 public/              single-page web app (vanilla JS + Chart.js)

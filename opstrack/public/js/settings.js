@@ -6,7 +6,7 @@
     { id: 'profiles', label: 'Profiles & Permissions', icon: 'shield', perm: 'profiles' },
     { id: 'forms', label: 'Forms', icon: 'form', perm: 'forms' },
     { id: 'email', label: 'Email (Inbound / Outbound)', icon: 'mail', perm: 'email' },
-    { id: 'notifications', label: 'Teams & WhatsApp', icon: 'chat', perm: 'notifications' },
+    { id: 'notifications', label: 'Chat notifications', icon: 'chat', perm: 'notifications' },
     { id: 'workflows', label: 'Workflow Automation', icon: 'flow', perm: 'workflows' },
     { id: 'remote', label: 'Remote Desktop', icon: 'monitor', perm: 'settings' },
     { id: 'general', label: 'General', icon: 'sliders', perm: 'settings' },
@@ -306,7 +306,7 @@
         case 'notify_channel': return App.meta.notifyChannels?.length
           ? `<label>Channel<select data-k="channelId">${App.options(App.meta.notifyChannels.map((c) => ({ value: c.id, label: `${c.name} (${App.meta.notifyMeta.types[c.type]})` })), a.channelId)}</select></label>
             <label class="span2">Extra text (optional)<input data-k="text" value="${esc(a.text || '')}" placeholder="e.g. Please pick this up within 15 minutes"></label>`
-          : '<p class="muted span2">No Teams / WhatsApp channels yet – add one under Settings → Teams &amp; WhatsApp.</p>';
+          : '<p class="muted span2">No Teams, Slack or WhatsApp channels yet – add one under Settings → Chat notifications.</p>';
         case 'create_ticket': return `<label class="span2">Subject<input data-k="subject" value="${esc(a.subject || '')}" placeholder="e.g. Weekly backup verification – {{date}}"></label>
           <label class="span2">Description<textarea data-k="description" rows="2">${esc(a.description || '')}</textarea></label>
           <label>Priority<select data-k="priority">${App.options(s.ticketPriorities, a.priority || 'Medium')}</select></label><label>Category<select data-k="category">${App.options(s.ticketCategories, a.category)}</select></label>
@@ -514,14 +514,16 @@
     const fieldHelp = Object.entries(nm.templateFields).map(([k, v]) => `<code>${k}</code> ${esc(v)}`).join(' · ');
     function channelModal(c = { type: 'teams', enabled: true, events: ['ticket.created'], priorities: [], messageMode: 'template', templateLanguage: 'en', templateFields: 'number,subject,priority,assignee' }) {
       App.modal({
-        title: c.id ? `Edit channel – ${c.name}` : 'Add Teams / WhatsApp channel',
+        title: c.id ? `Edit channel – ${c.name}` : 'Add Teams, Slack or WhatsApp channel',
         wide: true,
         body: `<div class="form-grid">
           <label>Channel name<input name="name" value="${esc(c.name || '')}" placeholder="e.g. Service desk Teams channel" required></label>
           <label>Type<select name="type">${App.options(Object.entries(nm.types).map(([v, l]) => ({ value: v, label: l })), c.type)}</select></label>
-          <div class="span2" data-ct="teams">
-            <label>Teams webhook address<input name="webhookUrl" value="${esc(c.webhookUrl || '')}" placeholder="https://….webhook.office.com/… or https://….logic.azure.com/…" autocomplete="off"></label>
-            <p class="hint">In Teams: open the channel → <b>⋯ → Workflows</b> → “Post to a channel when a webhook request is received” → copy the address. The older <b>Connectors → Incoming Webhook</b> address also works.</p>
+          <div class="span2" data-ct="teams slack">
+            <label>Webhook address<input name="webhookUrl" value="${esc(c.webhookUrl || '')}" placeholder="https://…" autocomplete="off"></label>
+            <p class="hint block" data-ct="teams">In Teams: open the channel → <b>⋯ → Workflows</b> → “Post to a channel when a webhook request is received” → copy the address. The older <b>Connectors → Incoming Webhook</b> address also works.</p>
+            <p class="hint block" data-ct="slack">In Slack: <b>api.slack.com/apps → Create New App → From scratch</b> → <b>Incoming Webhooks</b> → turn on → <b>Add New Webhook to Workspace</b> → pick the channel → copy the <code>https://hooks.slack.com/services/…</code> address.</p>
+            <label class="check" data-ct="slack"><input type="checkbox" name="mentionCritical" ${c.mentionCritical ? 'checked' : ''}> <span>Mention <b>@here</b> for Critical tickets</span></label>
           </div>
           <div class="span2 grid2" data-ct="whatsapp_meta">
             <label>Phone number ID<input name="phoneNumberId" value="${esc(c.phoneNumberId || '')}" placeholder="from Meta → WhatsApp → API Setup"></label>
@@ -570,18 +572,18 @@
     }
     const canEdit = App.can('notifications', 'edit');
     el.innerHTML = `<form class="card settings-form compact" id="pub">
-        <label>OpsTrack web address <small class="muted">(used for “Open ticket” links in Teams and WhatsApp)</small>
+        <label>OpsTrack web address <small class="muted">(used for “Open ticket” links in Teams, Slack and WhatsApp)</small>
           <div class="row"><input name="publicUrl" value="${esc(s.publicUrl || location.origin)}" class="grow" ${App.can('settings', 'edit') ? '' : 'disabled'}>${App.can('settings', 'edit') ? '<button class="btn" type="submit">Save</button>' : ''}</div></label>
       </form>
-      <div class="toolbar"><p class="muted">Post new and assigned tickets to Microsoft Teams channels and WhatsApp. Channels can also be used by workflows (action “Send a Teams / WhatsApp message”).</p><span class="grow"></span>
+      <div class="toolbar"><p class="muted">Post new and assigned tickets to Microsoft Teams, Slack and WhatsApp. Channels can also be used by workflows (action “Send a Teams / Slack / WhatsApp message”).</p><span class="grow"></span>
         ${App.can('notifications', 'create') ? `<button class="btn primary" id="new">${icon('plus', 16)} Add channel</button>` : ''}</div>
       <div class="card">${channels.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Channel</th><th>Type</th><th>Sends when</th><th>Priorities</th><th>Status</th><th></th><th></th></tr></thead><tbody>
-        ${channels.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.type !== 'teams' ? `<small class="muted">${esc(String(c.recipients || '').split(/[\n,;]+/).filter((x) => x.trim()).length)} number(s)${c.notifyAssignee ? ' + assignee' : ''} · ${c.messageMode === 'text' ? 'plain text' : 'template'}</small>` : ''}</td>
+        ${channels.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.type === 'slack' && c.mentionCritical ? '<small class="muted">@here on Critical</small>' : ''}${c.type.startsWith('whatsapp') ? `<small class="muted">${esc(String(c.recipients || '').split(/[\n,;]+/).filter((x) => x.trim()).length)} number(s)${c.notifyAssignee ? ' + assignee' : ''} · ${c.messageMode === 'text' ? 'plain text' : 'template'}</small>` : ''}</td>
           <td>${esc(nm.types[c.type] || c.type)}</td><td>${(c.events || []).map((e) => `<span class="tag ghost">${esc(nm.events[e] || e)}</span>`).join('')}</td>
           <td>${(c.priorities || []).length ? c.priorities.map((p) => App.priorityPill(p)).join(' ') : '<span class="muted">all</span>'}</td>
           <td>${c.enabled ? '<span class="pill st-resolved">Enabled</span>' : '<span class="pill st-closed">Disabled</span>'}</td>
           <td>${canEdit ? `<button class="btn sm ghost" data-test="${c.id}">Send test</button>` : ''}</td>${actionBtns('notifications', c.id)}</tr>`).join('')}
-      </tbody></table></div>` : App.empty('No channels yet', 'Add a Microsoft Teams channel or WhatsApp numbers to be told about new tickets.')}</div>
+      </tbody></table></div>` : App.empty('No channels yet', 'Add a Microsoft Teams or Slack channel, or WhatsApp numbers, to be told about new tickets.')}</div>
       <section class="card"><header><h3>Delivery log</h3></header>${log.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>When</th><th>Channel</th><th>Event</th><th>Ticket</th><th>Result</th></tr></thead><tbody>
         ${log.map((l) => `<tr><td>${App.fmtDateTime(l.at)}</td><td>${esc(l.channel)}</td><td>${esc(nm.events[l.event] || { workflow: 'Workflow', test: 'Test message' }[l.event] || l.event)}</td><td>${esc(l.ticket || '—')}</td><td><span class="pill ${l.status === 'sent' ? 'st-resolved' : 'prio-critical'}">${esc(l.status)}</span> <small class="muted">${esc(l.detail || '')}</small></td></tr>`).join('')}
       </tbody></table></div>` : '<p class="muted pad">Nothing sent yet.</p>'}</section>`;
