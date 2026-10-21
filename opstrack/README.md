@@ -27,6 +27,9 @@ A self-hosted web application for engineering and support teams that combines:
   engineer and activity.
 - **Reports** – Project × Engineer effort summary and detailed log, CSV export.
 - **Team** – directory and reporting-manager org chart.
+- **Teams & WhatsApp notifications** – new and assigned tickets are posted to Microsoft Teams
+  channels and sent on WhatsApp (Meta Cloud API or Twilio), filtered by priority. See
+  [Teams & WhatsApp notifications](#teams--whatsapp-notifications).
 - **Settings (⚙ gear icon)**
   - **Users** – create, modify, delete, enable/disable, reset password,
     assign **profile** and **reporting manager**.
@@ -181,6 +184,47 @@ Put it behind HTTPS (nginx, Caddy, IIS, or your cloud's load balancer).
 | `DATABASE_SSL_VERIFY` | `true` | Set to `false` if the database uses a certificate Node.js can't verify |
 | `TRUST_PROXY` | `1` | Number of reverse proxies in front of the app; set to `0` when exposed directly |
 
+## Teams & WhatsApp notifications
+
+**Settings → Teams & WhatsApp** sends a message whenever a ticket is **created** and/or **assigned**.
+Each channel can be limited to certain priorities, for example only High and Critical.
+Set **OpsTrack web address** at the top of that page so messages link back to the ticket.
+
+**Microsoft Teams**
+1. In Teams, open the channel, click **⋯ → Workflows**, and choose
+   *“Post to a channel when a webhook request is received”*. Copy the address it gives you.
+   An older **Connectors → Incoming Webhook** address also works.
+2. In OpsTrack, click **Add channel**, choose type *Microsoft Teams*, paste the address and click **Send test**.
+
+The message is an Adaptive Card showing the ticket number, subject, priority, category, status,
+requester and assignee, with an **Open ticket** button.
+
+**WhatsApp**
+
+WhatsApp only lets businesses start a conversation with a **pre-approved message template**.
+Plain-text messages are delivered only within 24 hours of the recipient messaging you, so they suit testing.
+
+- **Meta WhatsApp Cloud API** (official, free tier available):
+  1. Create an app at developers.facebook.com, add the *WhatsApp* product, and note the **Phone number ID**.
+  2. Create a permanent **System User access token** with `whatsapp_business_messaging` permission.
+  3. In WhatsApp Manager, create a *Utility* template, for example `new_ticket_alert` with the body
+     “New ticket {{1}}: {{2}} (priority {{3}}). Open: {{4}}”, and wait for approval.
+  4. In OpsTrack, choose *WhatsApp – Meta Cloud API*. Enter the phone number ID, the token, the template
+     name and language, and the variables in order, for example `number,subject,priority,link`.
+- **Twilio**:
+  1. Use your Twilio Account SID (`AC…`), auth token and WhatsApp sender number. For the Twilio
+     Sandbox, the sender is `+14155238886`.
+  2. Create an approved *Content template* and enter its SID (`HX…`).
+  3. In the Sandbox, you can use plain-text mode after each recipient has joined the sandbox.
+
+Recipients are WhatsApp numbers in international format, one per line or separated by commas.
+Tick **Also send to the assigned engineer** to message the engineer at the phone number in their
+user profile.
+
+Every send is recorded in the **Delivery log** with the provider's error if it failed. Workflows can
+also send to any channel with the action **Send a Teams / WhatsApp message**, with optional extra
+text that can use `{{ticket.number}}`-style placeholders.
+
 ## Remote management
 
 Engineers start remote sessions from **Devices & Remote**, or from a ticket that has a device
@@ -246,6 +290,7 @@ lib/auth.js          password hashing (scrypt), sessions, presence, permissions
 lib/seed.js          default profiles, admin user, settings, sample form
 lib/tickets.js       ticket service, workload calculation, notifications
 lib/workflow.js      workflow engine + scheduler
+lib/notify.js        Teams and WhatsApp (Meta / Twilio) notifications
 lib/remote.js        remote desktop links (MeshCentral / Guacamole / custom) and session logging
 lib/email.js         SMTP (nodemailer) / IMAP (imapflow) channels
 public/              single-page web app (vanilla JS + Chart.js)

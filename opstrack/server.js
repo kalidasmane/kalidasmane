@@ -8,6 +8,7 @@ const tickets = require('./lib/tickets');
 const workflow = require('./lib/workflow');
 const email = require('./lib/email');
 const remote = require('./lib/remote');
+const notify = require('./lib/notify');
 
 const app = express();
 app.disable('x-powered-by');
@@ -101,6 +102,8 @@ app.get('/api/meta', requireAuth, (req, res) => {
     workflowMeta: { triggers: workflow.TRIGGERS, operators: workflow.OPERATORS, actions: workflow.ACTIONS },
     emailProviders: email.PROVIDERS,
     remoteProviders: remote.PROVIDERS,
+    notifyMeta: { events: notify.EVENTS, types: notify.TYPES, templateFields: notify.TEMPLATE_FIELDS },
+    notifyChannels: can(req.user, 'workflows', 'view') ? db.all('notifyChannels').map((c) => pick(c, ['id', 'name', 'type'])) : [],
     devices: can(req.user, 'devices', 'view') ? db.all('devices').map((d) => pick(d, ['id', 'name', 'type', 'customer'])) : [],
   });
 });
@@ -654,6 +657,61 @@ app.post('/api/email-accounts/:id/send-test', requireAuth, requirePerm('email', 
   bad(res, `Send failed: ${last?.detail || 'unknown error'}`);
 });
 
+// ---------- Teams & WhatsApp notification channels ----------
+const NOTIFY_FIELDS = ['name', 'type', 'enabled', 'events', 'priorities', 'webhookUrl', 'phoneNumberId', 'accessToken',
+  'accountSid', 'authToken', 'fromNumber', 'recipients', 'notifyAssignee', 'messageMode', 'templateName',
+  'templateLanguage', 'contentSid', 'templateFields'];
+
+function cleanChannel(b, existing = {}) {
+  const c = pick(b, NOTIFY_FIELDS);
+  for (const k of notify.SECRET_FIELDS) if (c[k] === '********') delete c[k]; // unchanged secret
+  for (const k of Object.keys(c)) if (typeof c[k] === 'string') c[k] = c[k].trim();
+  if ('events' in c) c.events = (Array.isArray(c.events) ? c.events : []).filter((e) => notify.EVENTS[e]);
+  if ('priorities' in c) c.priorities = (Array.isArray(c.priorities) ? c.priorities : []).filter((p) => settings().ticketPriorities.includes(p));
+  const m = { ...existing, ...c };
+  if (!m.name) return { error: 'Channel name is required' };
+  if (!notify.TYPES[m.type]) return { error: 'Choose a channel type' };
+  if (m.type === 'teams' && !/^https?:\/\/\S+$/i.test(m.webhookUrl || '')) return { error: 'Paste the Teams webhook address (https://…)' };
+  if (m.type === 'whatsapp_meta' && (!m.phoneNumberId || !m.accessToken)) return { error: 'Phone number ID and access token are required' };
+  if (m.type === 'whatsapp_twilio' && (!/^AC\w{32}$/.test(m.accountSid || '') || !m.authToken || !m.fromNumber)) return { error: 'Twilio Account SID (AC…), auth token and WhatsApp sender number are required' };
+  if (m.type !== 'teams' && m.messageMode !== 'text') {
+    if (m.type === 'whatsapp_meta' && !m.templateName) return { error: 'Enter the approved WhatsApp template name (or choose plain-text mode)' };
+    if (m.type === 'whatsapp_twilio' && !/^HX\w{32}$/.test(m.contentSid || '')) return { error: 'Enter the Twilio Content template SID (HX…) (or choose plain-text mode)' };
+  }
+  if ('templateFields' in c) {
+    const bad = String(c.templateFields).split(',').map((x) => x.trim()).filter((x) => x && !notify.TEMPLATE_FIELDS[x]);
+    if (bad.length) return { error: `Unknown template field(s): ${bad.join(', ')}` };
+  }
+  return { patch: c };
+}
+
+app.get('/api/notify-channels', requireAuth, requirePerm('notifications', 'view'), (req, res) => {
+  res.json({ channels: db.all('notifyChannels').map(notify.mask), log: db.all('notifyLog').slice(0, 100) });
+});
+app.post('/api/notify-channels', requireAuth, requirePerm('notifications', 'create'), (req, res) => {
+  const { patch, error } = cleanChannel({ enabled: true, events: ['ticket.created'], priorities: [], messageMode: 'template', ...req.body });
+  if (error) return bad(res, error);
+  res.json(notify.mask(db.insert('notifyChannels', patch)));
+});
+app.put('/api/notify-channels/:id', requireAuth, requirePerm('notifications', 'edit'), (req, res) => {
+  const ch = db.find('notifyChannels', req.params.id);
+  if (!ch) return bad(res, 'Channel not found', 404);
+  const { patch, error } = cleanChannel(req.body || {}, ch);
+  if (error) return bad(res, error);
+  res.json(notify.mask(db.update('notifyChannels', ch.id, patch)));
+});
+app.delete('/api/notify-channels/:id', requireAuth, requirePerm('notifications', 'delete'), (req, res) => {
+  if (!db.remove('notifyChannels', req.params.id)) return bad(res, 'Channel not found', 404);
+  res.json({ ok: true });
+});
+app.post('/api/notify-channels/:id/test', requireAuth, requirePerm('notifications', 'edit'), async (req, res) => {
+  const ch = db.find('notifyChannels', req.params.id);
+  if (!ch) return bad(res, 'Channel not found', 404);
+  const r = await notify.test(ch);
+  if (!r.ok) return bad(res, `Test failed: ${r.detail}`);
+  res.json({ ok: true, message: `Test message ${r.detail}` });
+});
+
 // ---------- workflows ----------
 const WF_FIELDS = ['name', 'description', 'enabled', 'trigger', 'formId', 'emailAccountId', 'matchType', 'conditions', 'actions', 'schedule', 'order'];
 
@@ -687,7 +745,7 @@ app.get('/api/settings', requireAuth, requirePerm('settings', 'view'), (req, res
 app.put('/api/settings', requireAuth, requirePerm('settings', 'edit'), (req, res) => {
   const b = req.body || {};
   const listKeys = ['activityCategories', 'ticketCategories', 'ticketPriorities', 'ticketStatuses', 'closedStatuses'];
-  const patch = pick(b, ['companyName', 'ticketPrefix', 'workloadGreenMax', 'dailyTargetHours', 'slaHours', 'notifyOnAssign', 'notifyRequesterOnCreate', ...listKeys]);
+  const patch = pick(b, ['companyName', 'publicUrl', 'ticketPrefix', 'workloadGreenMax', 'dailyTargetHours', 'slaHours', 'notifyOnAssign', 'notifyRequesterOnCreate', ...listKeys]);
   if (b.remote && typeof b.remote === 'object') {
     const r = pick(b.remote, ['provider', 'serverUrl', 'embed', 'guacDataSource', 'urlTemplate', 'logToTracker', 'trackerCategory']);
     if ('provider' in r && r.provider && !remote.PROVIDERS[r.provider]) return bad(res, 'Unknown remote desktop provider');
@@ -696,6 +754,7 @@ app.put('/api/settings', requireAuth, requirePerm('settings', 'edit'), (req, res
     patch.remote = { ...settings().remote, ...r, embed: r.embed !== false, logToTracker: r.logToTracker !== false };
   }
   for (const k of listKeys) if (k in patch) patch[k] = (Array.isArray(patch[k]) ? patch[k] : String(patch[k]).split(',')).map((x) => String(x).trim()).filter(Boolean);
+  if (patch.publicUrl && !/^https?:\/\/\S+$/i.test(patch.publicUrl)) return bad(res, 'OpsTrack address must start with http:// or https://');
   if (patch.ticketPrefix) patch.ticketPrefix = patch.ticketPrefix.toUpperCase().replace(/[^A-Z0-9]/g, '') || 'INC';
   Object.assign(db.state.settings, patch);
   db.save();

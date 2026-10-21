@@ -27,6 +27,7 @@ const ACTIONS = {
   set_project: 'Link to project',
   add_comment: 'Add a note / comment',
   send_email: 'Send an email',
+  notify_channel: 'Send a Teams / WhatsApp message',
   create_ticket: 'Create a ticket',
 };
 
@@ -87,7 +88,7 @@ function execute(wf, a, t, notes) {
   const tickets = require('./tickets');
   const actor = { name: `Workflow: ${wf.name}` };
   const opts = { skipWorkflows: true };
-  if (!t && !['create_ticket', 'send_email'].includes(a.type)) return null; // needs a ticket
+  if (!t && !['create_ticket', 'send_email', 'notify_channel'].includes(a.type)) return null; // needs a ticket
   switch (a.type) {
     case 'assign_user':
       if (a.userId) { tickets.update(t, { assigneeId: a.userId }, actor, opts); notes.push(`assigned to ${db.find('users', a.userId)?.name}`); }
@@ -116,6 +117,16 @@ function execute(wf, a, t, notes) {
       t.comments.push({ id: db.uid(), at: db.now(), authorName: actor.name, text: render(a.text, t), internal: a.internal !== false });
       notes.push('comment added');
       break;
+    case 'notify_channel': {
+      const ch = db.find('notifyChannels', a.channelId);
+      if (!ch) break;
+      const notify = require('./notify');
+      const facts = t ? notify.ticketFacts(t, 'workflow') : { event: wf.name, number: '', subject: wf.name, priority: '', category: '', status: '', requester: '', assignee: '', link: '' };
+      facts.event = wf.name;
+      notify.send(ch, facts, { ticket: t, extra: render(a.text, t), event: 'workflow' });
+      notes.push(`notified ${ch.name}`);
+      break;
+    }
     case 'send_email': {
       let to = a.address;
       if (a.to === 'requester') to = t?.requesterEmail;
