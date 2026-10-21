@@ -27,7 +27,7 @@ const ACTIONS = {
   set_project: 'Link to project',
   add_comment: 'Add a note / comment',
   send_email: 'Send an email',
-  notify_channel: 'Send a Teams / WhatsApp message',
+  notify_channel: 'Send a Teams / Slack / WhatsApp message',
   create_ticket: 'Create a ticket',
 };
 

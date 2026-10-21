@@ -18,7 +18,7 @@ const MODULES = {
   profiles: { label: 'Profiles', actions: ['view', 'create', 'edit', 'delete'] },
   forms: { label: 'Forms', actions: ['view', 'create', 'edit', 'delete'] },
   email: { label: 'Email Channels', actions: ['view', 'create', 'edit', 'delete'] },
-  notifications: { label: 'Teams & WhatsApp', actions: ['view', 'create', 'edit', 'delete'] },
+  notifications: { label: 'Chat notifications (Teams, Slack, WhatsApp)', actions: ['view', 'create', 'edit', 'delete'] },
   workflows: { label: 'Workflow Automation', actions: ['view', 'create', 'edit', 'delete'] },
   settings: { label: 'General Settings', actions: ['view', 'edit'] },
 };
