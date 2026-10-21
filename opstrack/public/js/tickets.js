@@ -23,6 +23,7 @@
               <label class="span2">Description<textarea name="description" rows="4"></textarea></label>
               <label>Requester name<input name="requesterName" value="${esc(App.me.name)}"></label>
               <label>Requester email<input name="requesterEmail" type="email" value="${esc(App.me.email || '')}"></label>
+              <label class="span2">Notify also (CC) <small class="muted">email addresses, comma-separated – they get status updates and replies</small><input name="watchers" placeholder="manager@customer.com, it-lead@yourcompany.com"></label>
               <label>Category<select name="category">${App.options(s.ticketCategories)}</select></label>
               <label>Priority<select name="priority">${App.options(s.ticketPriorities, 'Medium')}</select></label>
               <label>Project<select name="projectId">${App.projectOptions('')}</select></label>
@@ -139,6 +140,7 @@
             <label>Assignee ${canAssign ? '' : '<small class="muted">(no assign permission)</small>'}${canAssign ? App.userPicker('assigneeId', t.assigneeId) : `<div>${App.userChip(App.user(t.assigneeId))}</div>`}</label>
             ${!t.assigneeId && canEdit && !App.can('tickets', 'assign') ? '<button type="button" class="btn sm" id="take">Assign to me</button>' : ''}
             <label>Project<select name="projectId" ${canEdit ? '' : 'disabled'}>${App.projectOptions(t.projectId)}</select></label>
+            <label>Notify also (CC) <small class="muted">emails, comma-separated</small><input name="watchers" value="${esc(t.watchers || '')}" placeholder="name@company.com" ${canEdit ? '' : 'disabled'}></label>
             ${App.meta.devices?.length || t.deviceId ? `<label>Device<select name="deviceId" ${canEdit ? '' : 'disabled'}>${App.options(App.meta.devices.map((d) => ({ value: d.id, label: d.name })), t.deviceId, { blank: '— None —' })}</select></label>` : ''}
             ${t.deviceId && App.can('devices', 'connect') ? `<button type="button" class="btn sm primary remote-btn" id="remote">${icon('monitor', 15)} Remote session to ${esc(t.deviceName || 'device')}</button>` : ''}
             <dl class="facts"><dt>Due (SLA)</dt><dd class="${t.overdue ? 'bad' : ''}">${App.fmtDateTime(t.dueAt)}</dd><dt>Resolved</dt><dd>${App.fmtDateTime(t.resolvedAt)}</dd><dt>Time spent</dt><dd>${fmtMins(t.timeSpentMinutes)}</dd></dl>

@@ -509,6 +509,9 @@
   // ================= TEAMS & WHATSAPP =================
   async function notificationsTab(el) {
     const [{ channels, log }, s] = await Promise.all([App.get('/api/notify-channels'), App.get('/api/settings')]);
+    const en = s.emailNotify || {};
+    const outbound = App.can('email') ? (await App.get('/api/email-accounts').catch(() => ({ accounts: [] }))).accounts.filter((a) => a.direction === 'outbound' && a.enabled) : null;
+    const noOutbound = outbound !== null && !outbound.length;
     const nm = App.meta.notifyMeta;
     const prios = App.meta.settings.ticketPriorities;
     const fieldHelp = Object.entries(nm.templateFields).map(([k, v]) => `<code>${k}</code> ${esc(v)}`).join(' · ');
@@ -589,8 +592,29 @@
     }
     const canEdit = App.can('notifications', 'edit');
     el.innerHTML = `<form class="card settings-form compact" id="pub">
-        <label>OpsTrack web address <small class="muted">(used for “Open ticket” links in Teams, Slack, WhatsApp and SMS)</small>
+        <label>OpsTrack web address <small class="muted">(used for ticket links in emails, Teams, Slack, WhatsApp and SMS)</small>
           <div class="row"><input name="publicUrl" value="${esc(s.publicUrl || location.origin)}" class="grow" ${App.can('settings', 'edit') ? '' : 'disabled'}>${App.can('settings', 'edit') ? '<button class="btn" type="submit">Save</button>' : ''}</div></label>
+      </form>
+      <form class="card settings-form" id="em">
+        <header class="row"><h3>${icon('mail', 16)} Email notifications for ticket updates</h3></header>
+        ${noOutbound ? `<p class="notice">No outbound email channel is set up yet, so these emails can't be sent. <a href="#/settings/email">Add one under Settings → Email</a>.</p>` : ''}
+        <div class="email-rules">
+          <div><h4>Requester</h4>
+            <label class="check"><input type="checkbox" name="requesterOnStatus" ${en.requesterOnStatus ? 'checked' : ''}> When the status changes to:</label>
+            <div class="chips-row">${App.meta.settings.ticketStatuses.map((st) => `<label class="check inline"><input type="checkbox" data-st value="${esc(st)}" ${(en.requesterStatuses || []).includes(st) ? 'checked' : ''}> ${esc(st)}</label>`).join('')}</div>
+            <label class="check"><input type="checkbox" name="requesterOnReply" ${en.requesterOnReply ? 'checked' : ''}> When an engineer replies (public comments, never internal notes)</label>
+          </div>
+          <div><h4>Assigned engineer</h4>
+            <label class="check"><input type="checkbox" name="assigneeOnUpdate" ${en.assigneeOnUpdate ? 'checked' : ''}> When someone else changes the ticket</label>
+            <label class="check"><input type="checkbox" name="assigneeOnComment" ${en.assigneeOnComment ? 'checked' : ''}> When someone else comments, including requester email replies and internal notes</label>
+            <p class="hint block">Emails on assignment are set in Settings → General.</p>
+          </div>
+          <div><h4>CC on the ticket</h4>
+            <label class="check"><input type="checkbox" name="watchersOnUpdate" ${en.watchersOnUpdate ? 'checked' : ''}> Email addresses in a ticket's “Notify also (CC)” field get status, priority and assignee changes, plus public replies</label>
+          </div>
+        </div>
+        <p class="hint block">Nobody is emailed about their own change. Engineers' emails include a link to the ticket. Anyone can reply to an email to add a comment.</p>
+        ${App.can('settings', 'edit') ? '<footer><button class="btn primary" type="submit">Save email notifications</button></footer>' : ''}
       </form>
       <div class="toolbar"><p class="muted">Send new and assigned tickets to Microsoft Teams, Slack, WhatsApp and SMS. Channels can also be used by workflows (action “Send a Teams / Slack / WhatsApp / SMS message”).</p><span class="grow"></span>
         ${App.can('notifications', 'create') ? `<button class="btn primary" id="new">${icon('plus', 16)} Add channel</button>` : ''}</div>
@@ -604,6 +628,14 @@
       <section class="card"><header><h3>Delivery log</h3></header>${log.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>When</th><th>Channel</th><th>Event</th><th>Ticket</th><th>Result</th></tr></thead><tbody>
         ${log.map((l) => `<tr><td>${App.fmtDateTime(l.at)}</td><td>${esc(l.channel)}</td><td>${esc(nm.events[l.event] || { workflow: 'Workflow', test: 'Test message' }[l.event] || l.event)}</td><td>${esc(l.ticket || '—')}</td><td><span class="pill ${l.status === 'sent' ? 'st-resolved' : 'prio-critical'}">${esc(l.status)}</span> <small class="muted">${esc(l.detail || '')}</small></td></tr>`).join('')}
       </tbody></table></div>` : '<p class="muted pad">Nothing sent yet.</p>'}</section>`;
+    const emForm = el.querySelector('#em');
+    if (!App.can('settings', 'edit')) emForm.querySelectorAll('input').forEach((i) => { i.disabled = true; });
+    emForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const f = App.formData(emForm);
+      f.requesterStatuses = [...emForm.querySelectorAll('[data-st]:checked')].map((x) => x.value);
+      try { await App.put('/api/settings', { emailNotify: f }); App.toast('Email notifications saved'); } catch (err) { App.fail(err); }
+    });
     el.querySelector('#pub').addEventListener('submit', async (e) => {
       e.preventDefault();
       try { await App.put('/api/settings', { publicUrl: e.target.publicUrl.value.trim() }); App.toast('Address saved'); } catch (err) { App.fail(err); }

@@ -66,6 +66,7 @@ function create(data, actor, { source = 'web', skipWorkflows = false } = {}) {
     assigneeId: data.assigneeId || null,
     projectId: data.projectId || null,
     deviceId: data.deviceId || null,
+    watchers: require('./ticketmail').parseEmails(data.watchers).join(', '),
     requesterName: data.requesterName || actor?.name || '',
     requesterEmail: data.requesterEmail || actor?.email || '',
     formId: data.formId || null,
@@ -94,22 +95,24 @@ function create(data, actor, { source = 'web', skipWorkflows = false } = {}) {
   return t;
 }
 
-const TRACKED = ['subject', 'description', 'category', 'priority', 'status', 'assigneeId', 'projectId', 'deviceId'];
+const TRACKED = ['subject', 'description', 'category', 'priority', 'status', 'assigneeId', 'projectId', 'deviceId', 'watchers'];
 
-function update(t, patch, actor, { skipWorkflows = false } = {}) {
+function update(t, patch, actor, { skipWorkflows = false, quietEmail = false } = {}) {
   const s = settings();
   const changes = [];
   const before = { ...t };
   for (const k of TRACKED) {
     if (!(k in patch) || patch[k] === undefined) continue;
     let v = patch[k] === '' ? null : patch[k];
+    if (k === 'watchers') v = require('./ticketmail').parseEmails(v).join(', ');
     if (k === 'priority' && !s.ticketPriorities.includes(v)) continue;
     if (k === 'status' && !s.ticketStatuses.includes(v)) continue;
-    if (t[k] === v) continue;
+    if ((k === 'watchers' ? t[k] || '' : t[k]) === v) continue; // older tickets have no CC list
     t[k] = v;
     if (k === 'assigneeId') changes.push(`Assignee: ${userName(before.assigneeId)} → ${userName(v)}`);
     else if (k === 'projectId') changes.push(`Project: ${db.find('projects', v)?.name || 'None'}`);
     else if (k === 'deviceId') changes.push(`Device: ${db.find('devices', v)?.name || 'None'}`);
+    else if (k === 'watchers') changes.push(`CC: ${v || 'none'}`);
     else if (k !== 'description') changes.push(`${k[0].toUpperCase() + k.slice(1)}: ${before[k] ?? '—'} → ${v}`);
     else changes.push('Description updated');
   }
@@ -119,6 +122,7 @@ function update(t, patch, actor, { skipWorkflows = false } = {}) {
   if (!isClosed(t)) t.resolvedAt = null;
   t.updatedAt = db.now();
   addHistory(t, changes.join(' · '), actor);
+  if (!quietEmail) require('./ticketmail').onUpdate(t, before, changes, actor);
   if (before.assigneeId !== t.assigneeId) {
     notifyAssignee(t);
     if (t.assigneeId && !creating.has(t.id)) require('./notify').ticketEvent('ticket.assigned', t);
@@ -128,22 +132,16 @@ function update(t, patch, actor, { skipWorkflows = false } = {}) {
   return t;
 }
 
-function addComment(t, text, actor, { internal = false, fromEmail = null } = {}) {
+function addComment(t, text, actor, { internal = false, fromEmail = null, emailNote = '' } = {}) {
   t.comments = t.comments || [];
-  t.comments.push({
+  const comment = {
     id: db.uid(), at: db.now(), authorId: actor?.id || null,
     authorName: actor?.name || fromEmail || 'Unknown', text: String(text), internal,
-  });
+  };
+  t.comments.push(comment);
   t.updatedAt = db.now();
   db.save();
-  // Reply to requester by email for public comments made by staff
-  if (!internal && actor && t.requesterEmail && t.source !== 'web') {
-    require('./email').sendMail({
-      to: t.requesterEmail,
-      subject: `Re: [${t.number}] ${t.subject}`,
-      text: `${text}\n\n— ${actor.name}, ${settings().companyName}`,
-    });
-  }
+  require('./ticketmail').onComment(t, comment, actor, fromEmail, emailNote);
 }
 
 // Inbound email: a reply with [INC-1234] in the subject becomes a comment,
@@ -153,8 +151,11 @@ function fromEmail({ subject, text, fromEmail: email, fromName, account }) {
   const m = subject.match(new RegExp(`\\[(${prefix}-\\d+)\\]`, 'i'));
   const existing = m && db.all('tickets').find((t) => t.number.toUpperCase() === m[1].toUpperCase());
   if (existing) {
-    addComment(existing, text, null, { fromEmail: fromName ? `${fromName} <${email}>` : email });
-    if (isClosed(existing)) update(existing, { status: 'Open' }, { name: 'Email' });
+    const sender = fromName ? `${fromName} <${email}>` : email;
+    // Reopen quietly; the reply email below mentions it, so people get one email, not two.
+    const reopened = isClosed(existing);
+    if (reopened) update(existing, { status: 'Open' }, { name: `${fromName || email} (email reply)`, email }, { quietEmail: true });
+    addComment(existing, text, null, { fromEmail: sender, emailNote: reopened ? 'The ticket was reopened by this reply.' : '' });
     return { created: false, ticket: existing };
   }
   const form = account?.defaultFormId ? db.find('forms', account.defaultFormId) : null;

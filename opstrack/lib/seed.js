@@ -55,6 +55,7 @@ const DEFAULT_SETTINGS = {
   slaHours: { Low: 72, Medium: 24, High: 8, Critical: 4 },
   notifyOnAssign: true,
   notifyRequesterOnCreate: true,
+  emailNotify: { ...require('./ticketmail').DEFAULTS },
   remote: {
     provider: '', // meshcentral | guacamole | custom
     serverUrl: '',

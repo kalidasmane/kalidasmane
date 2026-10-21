@@ -426,6 +426,12 @@ legend { font-size: 12.5px; font-weight: 600; color: var(--text-2); padding: 0 6
 .switch input:checked + i::after { transform: translateX(18px); }
 .settings-form { padding: 20px; }
 .settings-form.compact { padding: 14px 20px; }
+.settings-form > header { padding: 0 0 6px; }
+.email-rules { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin-top: 8px; }
+.email-rules > div { display: grid; gap: 8px; align-content: start; }
+.email-rules h4 { margin: 0; }
+.chips-row { display: flex; flex-wrap: wrap; gap: 4px 12px; padding-left: 24px; }
+@media (max-width: 960px) { .email-rules { grid-template-columns: 1fr; } }
 .settings-form.compact .row input { min-width: 0; }
 .settings-form footer { margin-top: 18px; display: flex; justify-content: flex-end; }
 
