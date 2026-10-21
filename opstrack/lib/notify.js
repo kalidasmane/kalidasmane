@@ -1,4 +1,4 @@
-// Chat notifications: Microsoft Teams (channel webhook / Workflows), Slack (incoming webhook) and WhatsApp
+// Notifications: Microsoft Teams (channel webhook / Workflows), Slack (incoming webhook), WhatsApp and SMS
 // (Meta WhatsApp Cloud API or Twilio). Channels subscribe to ticket events and are
 // also usable from workflows. Sends are asynchronous and never throw.
 const db = require('./db');
@@ -13,10 +13,13 @@ const TYPES = {
   slack: 'Slack',
   whatsapp_meta: 'WhatsApp – Meta Cloud API',
   whatsapp_twilio: 'WhatsApp – Twilio',
+  sms_twilio: 'SMS – Twilio',
+  sms_vonage: 'SMS – Vonage (Nexmo)',
+  sms_http: 'SMS – other gateway (HTTP API)',
 };
 
 // Secret fields are never sent back to the browser.
-const SECRET_FIELDS = ['webhookUrl', 'accessToken', 'authToken'];
+const SECRET_FIELDS = ['webhookUrl', 'accessToken', 'authToken', 'apiSecret', 'gatewayUrl', 'gatewayHeader'];
 
 // Fields a WhatsApp template's body placeholders {{1}}, {{2}}, … are filled with, in order.
 const TEMPLATE_FIELDS = {
@@ -27,6 +30,7 @@ const TEMPLATE_FIELDS = {
 
 const GRAPH_URL = () => process.env.WHATSAPP_GRAPH_URL || 'https://graph.facebook.com/v21.0';
 const TWILIO_URL = () => process.env.TWILIO_API_URL || 'https://api.twilio.com/2010-04-01';
+const VONAGE_URL = () => process.env.VONAGE_API_URL || 'https://rest.nexmo.com';
 
 function ticketLink(t) {
   const base = String(db.state.settings.publicUrl || '').replace(/\/+$/, '');
@@ -153,6 +157,64 @@ async function sendTwilio(ch, f, extra, to) {
   return `sent to ${to.length} WhatsApp number(s)`;
 }
 
+// ---------- SMS ----------
+// One short message: up to 3 SMS segments, link last so it is never cut off.
+function smsText(f, extra) {
+  const brand = db.state.settings.companyName || 'OpsTrack';
+  const subject = f.subject.length > 80 ? `${f.subject.slice(0, 77)}...` : f.subject;
+  let text = `[${brand}] ${f.event} ${f.number} (${f.priority}): ${subject}. Assignee: ${f.assignee}.${extra ? ` ${extra}` : ''}`;
+  const room = 450 - (f.link ? f.link.length + 1 : 0);
+  if (text.length > room) text = `${text.slice(0, room - 3)}...`;
+  return f.link ? `${text} ${f.link}` : text;
+}
+
+async function sendSmsTwilio(ch, f, extra, to) {
+  const url = `${TWILIO_URL()}/Accounts/${encodeURIComponent(ch.accountSid)}/Messages.json`;
+  const auth = Buffer.from(`${ch.accountSid}:${ch.authToken}`).toString('base64');
+  for (const n of to) {
+    const form = new URLSearchParams({ To: n.startsWith('+') ? n : `+${n}`, Body: smsText(f, extra) });
+    // A Messaging Service SID (MG…) lets Twilio pick the sender; otherwise a phone number / sender ID.
+    if (/^MG\w{32}$/.test(ch.fromNumber || '')) form.set('MessagingServiceSid', ch.fromNumber); else form.set('From', ch.fromNumber);
+    await post(url, { method: 'POST', headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: form.toString() });
+  }
+  return `sent to ${to.length} phone number(s)`;
+}
+
+async function sendSmsVonage(ch, f, extra, to) {
+  for (const n of to) {
+    const form = new URLSearchParams({ api_key: ch.apiKey, api_secret: ch.apiSecret, from: ch.fromNumber, to: n.replace(/^\+/, ''), text: smsText(f, extra) });
+    const body = await post(`${VONAGE_URL()}/sms/json`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form.toString() });
+    // Vonage answers HTTP 200 even when a message is rejected; the status is per message.
+    let msg = null;
+    try { msg = JSON.parse(body).messages?.[0]; } catch { /* not JSON */ }
+    if (!msg || String(msg.status) !== '0') throw new Error(`Vonage: ${msg?.['error-text'] || body.slice(0, 200)}`);
+  }
+  return `sent to ${to.length} phone number(s)`;
+}
+
+// Any HTTP SMS gateway: placeholders {to} (+countrycode…), {to_digits} and {message}.
+async function sendSmsHttp(ch, f, extra, to) {
+  const method = ch.gatewayMethod === 'GET' ? 'GET' : 'POST';
+  const json = ch.gatewayContentType === 'json';
+  const headers = {};
+  for (const line of String(ch.gatewayHeader || '').split('\n')) {
+    const i = line.indexOf(':');
+    if (i > 0) headers[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  for (const n of to) {
+    const vals = { to: n.startsWith('+') ? n : `+${n}`, to_digits: n.replace(/^\+/, ''), message: smsText(f, extra) };
+    const fill = (tpl, enc) => String(tpl || '').replace(/\{(to|to_digits|message)\}/g, (_, k) => enc(vals[k]));
+    const url = fill(ch.gatewayUrl, encodeURIComponent);
+    const init = { method, headers: { ...headers } };
+    if (method === 'POST') {
+      init.headers['Content-Type'] = json ? 'application/json' : 'application/x-www-form-urlencoded';
+      init.body = fill(ch.gatewayBody, json ? (v) => JSON.stringify(String(v)).slice(1, -1) : encodeURIComponent);
+    }
+    await post(url, init);
+  }
+  return `sent to ${to.length} phone number(s)`;
+}
+
 // Sends one message on one channel. Returns { ok, detail }.
 async function send(ch, facts, { ticket = null, extra = '', event = 'manual' } = {}) {
   let result;
@@ -162,8 +224,9 @@ async function send(ch, facts, { ticket = null, extra = '', event = 'manual' } =
     else if (ch.type === 'slack') detail = await sendSlack(ch, facts, extra);
     else {
       const to = recipients(ch, ticket);
-      if (!to.length) throw new Error('No valid WhatsApp numbers (use international format, e.g. +919812345678)');
-      detail = ch.type === 'whatsapp_twilio' ? await sendTwilio(ch, facts, extra, to) : await sendMeta(ch, facts, extra, to);
+      if (!to.length) throw new Error('No valid phone numbers (use international format, e.g. +919812345678)');
+      const senders = { whatsapp_twilio: sendTwilio, whatsapp_meta: sendMeta, sms_twilio: sendSmsTwilio, sms_vonage: sendSmsVonage, sms_http: sendSmsHttp };
+      detail = await senders[ch.type](ch, facts, extra, to);
     }
     result = { ok: true, detail };
   } catch (e) {
