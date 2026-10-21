@@ -6,7 +6,7 @@
     { id: 'profiles', label: 'Profiles & Permissions', icon: 'shield', perm: 'profiles' },
     { id: 'forms', label: 'Forms', icon: 'form', perm: 'forms' },
     { id: 'email', label: 'Email (Inbound / Outbound)', icon: 'mail', perm: 'email' },
-    { id: 'notifications', label: 'Chat notifications', icon: 'chat', perm: 'notifications' },
+    { id: 'notifications', label: 'Notifications (chat & SMS)', icon: 'chat', perm: 'notifications' },
     { id: 'workflows', label: 'Workflow Automation', icon: 'flow', perm: 'workflows' },
     { id: 'remote', label: 'Remote Desktop', icon: 'monitor', perm: 'settings' },
     { id: 'general', label: 'General', icon: 'sliders', perm: 'settings' },
@@ -306,7 +306,7 @@
         case 'notify_channel': return App.meta.notifyChannels?.length
           ? `<label>Channel<select data-k="channelId">${App.options(App.meta.notifyChannels.map((c) => ({ value: c.id, label: `${c.name} (${App.meta.notifyMeta.types[c.type]})` })), a.channelId)}</select></label>
             <label class="span2">Extra text (optional)<input data-k="text" value="${esc(a.text || '')}" placeholder="e.g. Please pick this up within 15 minutes"></label>`
-          : '<p class="muted span2">No Teams, Slack or WhatsApp channels yet – add one under Settings → Chat notifications.</p>';
+          : '<p class="muted span2">No notification channels yet – add one under Settings → Notifications (chat &amp; SMS).</p>';
         case 'create_ticket': return `<label class="span2">Subject<input data-k="subject" value="${esc(a.subject || '')}" placeholder="e.g. Weekly backup verification – {{date}}"></label>
           <label class="span2">Description<textarea data-k="description" rows="2">${esc(a.description || '')}</textarea></label>
           <label>Priority<select data-k="priority">${App.options(s.ticketPriorities, a.priority || 'Medium')}</select></label><label>Category<select data-k="category">${App.options(s.ticketCategories, a.category)}</select></label>
@@ -514,7 +514,7 @@
     const fieldHelp = Object.entries(nm.templateFields).map(([k, v]) => `<code>${k}</code> ${esc(v)}`).join(' · ');
     function channelModal(c = { type: 'teams', enabled: true, events: ['ticket.created'], priorities: [], messageMode: 'template', templateLanguage: 'en', templateFields: 'number,subject,priority,assignee' }) {
       App.modal({
-        title: c.id ? `Edit channel – ${c.name}` : 'Add Teams, Slack or WhatsApp channel',
+        title: c.id ? `Edit channel – ${c.name}` : 'Add Teams, Slack, WhatsApp or SMS channel',
         wide: true,
         body: `<div class="form-grid">
           <label>Channel name<input name="name" value="${esc(c.name || '')}" placeholder="e.g. Service desk Teams channel" required></label>
@@ -529,14 +529,31 @@
             <label>Phone number ID<input name="phoneNumberId" value="${esc(c.phoneNumberId || '')}" placeholder="from Meta → WhatsApp → API Setup"></label>
             <label>Access token<input type="password" name="accessToken" value="${esc(c.accessToken || '')}" placeholder="permanent system-user token" autocomplete="new-password"></label>
           </div>
-          <div class="span2 grid2" data-ct="whatsapp_twilio">
+          <div class="span2 grid2" data-ct="whatsapp_twilio sms_twilio">
             <label>Account SID<input name="accountSid" value="${esc(c.accountSid || '')}" placeholder="AC…"></label>
             <label>Auth token<input type="password" name="authToken" value="${esc(c.authToken || '')}" autocomplete="new-password"></label>
-            <label>WhatsApp sender number<input name="fromNumber" value="${esc(c.fromNumber || '')}" placeholder="+14155238886"></label>
+          </div>
+          <div class="span2 grid2" data-ct="sms_vonage">
+            <label>API key<input name="apiKey" value="${esc(c.apiKey || '')}" autocomplete="off"></label>
+            <label>API secret<input type="password" name="apiSecret" value="${esc(c.apiSecret || '')}" autocomplete="new-password"></label>
+          </div>
+          <div class="span2 grid2" data-ct="whatsapp_twilio sms_twilio sms_vonage">
+            <label>Sender<input name="fromNumber" value="${esc(c.fromNumber || '')}" placeholder="+14155238886 or OPSTRK"></label>
+            <p class="hint block">WhatsApp: your WhatsApp-enabled number. SMS: a phone number, an alphanumeric sender ID (up to 11 characters, where the country allows it), or a Twilio Messaging Service SID (<code>MG…</code>).</p>
+          </div>
+          <div class="span2 grid2" data-ct="sms_http">
+            <label class="span2">Gateway address <small class="muted">placeholders: <code>{to}</code> (+91…), <code>{to_digits}</code> (91…), <code>{message}</code></small><input name="gatewayUrl" value="${esc(c.gatewayUrl || '')}" placeholder="https://api.example-sms.com/send?apikey=KEY&to={to_digits}&text={message}" autocomplete="off"></label>
+            <label>Method<select name="gatewayMethod">${App.options(['POST', 'GET'], c.gatewayMethod || 'POST')}</select></label>
+            <label>Body format (POST)<select name="gatewayContentType">${App.options([{ value: 'json', label: 'JSON' }, { value: 'form', label: 'Form (x-www-form-urlencoded)' }], c.gatewayContentType || 'json')}</select></label>
+            <label class="span2">Body (POST)<textarea name="gatewayBody" rows="3" placeholder='{"to": "{to}", "message": "{message}", "sender": "OPSTRK"}'>${esc(c.gatewayBody || '')}</textarea></label>
+            <label class="span2">Extra headers <small class="muted">(optional, one per line, e.g. <code>Authorization: Bearer …</code>)</small><textarea name="gatewayHeader" rows="2" autocomplete="off">${esc(c.gatewayHeader || '')}</textarea></label>
+          </div>
+          <div class="span2 grid2" data-ct="whatsapp_meta whatsapp_twilio sms_twilio sms_vonage sms_http">
+            <label class="span2">Send to (phone numbers, international format, one per line or comma-separated)<textarea name="recipients" rows="2" placeholder="+91 98123 45678&#10;+44 7700 900123">${esc(c.recipients || '')}</textarea></label>
+            <label class="check span2"><input type="checkbox" name="notifyAssignee" ${c.notifyAssignee ? 'checked' : ''}> Also send to the assigned engineer (phone number from their user profile)</label>
+            <p class="hint block span2" data-ct="sms_twilio sms_vonage sms_http">SMS text: “[${esc(App.meta.settings.companyName)}] New ticket INC-1023 (Critical): Email server down. Assignee: Ravi.” followed by the ticket link (up to 3 SMS segments).</p>
           </div>
           <div class="span2 grid2" data-ct="whatsapp_meta whatsapp_twilio">
-            <label class="span2">Send to (WhatsApp numbers, international format, one per line or comma-separated)<textarea name="recipients" rows="2" placeholder="+91 98123 45678&#10;+44 7700 900123">${esc(c.recipients || '')}</textarea></label>
-            <label class="check span2"><input type="checkbox" name="notifyAssignee" ${c.notifyAssignee ? 'checked' : ''}> Also send to the assigned engineer (phone number from their user profile)</label>
             <label>Message type<select name="messageMode">${App.options([{ value: 'template', label: 'Approved template (required to start conversations)' }, { value: 'text', label: 'Plain text (only inside a 24-hour customer-service window)' }], c.messageMode || 'template')}</select></label>
             <label data-ct="whatsapp_meta" data-mode="template">Template name<input name="templateName" value="${esc(c.templateName || '')}" placeholder="new_ticket_alert"></label>
             <label data-ct="whatsapp_meta" data-mode="template">Template language<input name="templateLanguage" value="${esc(c.templateLanguage || 'en')}" placeholder="en, en_US, hi"></label>
@@ -572,18 +589,18 @@
     }
     const canEdit = App.can('notifications', 'edit');
     el.innerHTML = `<form class="card settings-form compact" id="pub">
-        <label>OpsTrack web address <small class="muted">(used for “Open ticket” links in Teams, Slack and WhatsApp)</small>
+        <label>OpsTrack web address <small class="muted">(used for “Open ticket” links in Teams, Slack, WhatsApp and SMS)</small>
           <div class="row"><input name="publicUrl" value="${esc(s.publicUrl || location.origin)}" class="grow" ${App.can('settings', 'edit') ? '' : 'disabled'}>${App.can('settings', 'edit') ? '<button class="btn" type="submit">Save</button>' : ''}</div></label>
       </form>
-      <div class="toolbar"><p class="muted">Post new and assigned tickets to Microsoft Teams, Slack and WhatsApp. Channels can also be used by workflows (action “Send a Teams / Slack / WhatsApp message”).</p><span class="grow"></span>
+      <div class="toolbar"><p class="muted">Send new and assigned tickets to Microsoft Teams, Slack, WhatsApp and SMS. Channels can also be used by workflows (action “Send a Teams / Slack / WhatsApp / SMS message”).</p><span class="grow"></span>
         ${App.can('notifications', 'create') ? `<button class="btn primary" id="new">${icon('plus', 16)} Add channel</button>` : ''}</div>
       <div class="card">${channels.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Channel</th><th>Type</th><th>Sends when</th><th>Priorities</th><th>Status</th><th></th><th></th></tr></thead><tbody>
-        ${channels.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.type === 'slack' && c.mentionCritical ? '<small class="muted">@here on Critical</small>' : ''}${c.type.startsWith('whatsapp') ? `<small class="muted">${esc(String(c.recipients || '').split(/[\n,;]+/).filter((x) => x.trim()).length)} number(s)${c.notifyAssignee ? ' + assignee' : ''} · ${c.messageMode === 'text' ? 'plain text' : 'template'}</small>` : ''}</td>
+        ${channels.map((c) => `<tr><td><b>${esc(c.name)}</b>${c.type === 'slack' && c.mentionCritical ? '<small class="muted">@here on Critical</small>' : ''}${/^(whatsapp|sms)/.test(c.type) ? `<small class="muted">${esc(String(c.recipients || '').split(/[\n,;]+/).filter((x) => x.trim()).length)} number(s)${c.notifyAssignee ? ' + assignee' : ''}${c.type.startsWith('whatsapp') ? ` · ${c.messageMode === 'text' ? 'plain text' : 'template'}` : ''}</small>` : ''}</td>
           <td>${esc(nm.types[c.type] || c.type)}</td><td>${(c.events || []).map((e) => `<span class="tag ghost">${esc(nm.events[e] || e)}</span>`).join('')}</td>
           <td>${(c.priorities || []).length ? c.priorities.map((p) => App.priorityPill(p)).join(' ') : '<span class="muted">all</span>'}</td>
           <td>${c.enabled ? '<span class="pill st-resolved">Enabled</span>' : '<span class="pill st-closed">Disabled</span>'}</td>
           <td>${canEdit ? `<button class="btn sm ghost" data-test="${c.id}">Send test</button>` : ''}</td>${actionBtns('notifications', c.id)}</tr>`).join('')}
-      </tbody></table></div>` : App.empty('No channels yet', 'Add a Microsoft Teams or Slack channel, or WhatsApp numbers, to be told about new tickets.')}</div>
+      </tbody></table></div>` : App.empty('No channels yet', 'Add a Microsoft Teams or Slack channel, or WhatsApp / SMS numbers, to be told about new tickets.')}</div>
       <section class="card"><header><h3>Delivery log</h3></header>${log.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>When</th><th>Channel</th><th>Event</th><th>Ticket</th><th>Result</th></tr></thead><tbody>
         ${log.map((l) => `<tr><td>${App.fmtDateTime(l.at)}</td><td>${esc(l.channel)}</td><td>${esc(nm.events[l.event] || { workflow: 'Workflow', test: 'Test message' }[l.event] || l.event)}</td><td>${esc(l.ticket || '—')}</td><td><span class="pill ${l.status === 'sent' ? 'st-resolved' : 'prio-critical'}">${esc(l.status)}</span> <small class="muted">${esc(l.detail || '')}</small></td></tr>`).join('')}
       </tbody></table></div>` : '<p class="muted pad">Nothing sent yet.</p>'}</section>`;

@@ -27,9 +27,9 @@ A self-hosted web application for engineering and support teams that combines:
   engineer and activity.
 - **Reports** – Project × Engineer effort summary and detailed log, CSV export.
 - **Team** – directory and reporting-manager org chart.
-- **Chat notifications** – new and assigned tickets are posted to Microsoft Teams and Slack
-  channels and sent on WhatsApp (Meta Cloud API or Twilio), filtered by priority. See
-  [Chat notifications](#chat-notifications-teams-slack-whatsapp).
+- **Notifications** – new and assigned tickets are posted to Microsoft Teams and Slack
+  channels and sent by WhatsApp (Meta Cloud API or Twilio) and SMS (Twilio, Vonage or any HTTP
+  SMS gateway), filtered by priority. See [Notifications](#notifications-teams-slack-whatsapp-sms).
 - **Settings (⚙ gear icon)**
   - **Users** – create, modify, delete, enable/disable, reset password,
     assign **profile** and **reporting manager**.
@@ -184,9 +184,9 @@ Put it behind HTTPS (nginx, Caddy, IIS, or your cloud's load balancer).
 | `DATABASE_SSL_VERIFY` | `true` | Set to `false` if the database uses a certificate Node.js can't verify |
 | `TRUST_PROXY` | `1` | Number of reverse proxies in front of the app; set to `0` when exposed directly |
 
-## Chat notifications (Teams, Slack, WhatsApp)
+## Notifications (Teams, Slack, WhatsApp, SMS)
 
-**Settings → Chat notifications** sends a message whenever a ticket is **created** and/or **assigned**.
+**Settings → Notifications (chat & SMS)** sends a message whenever a ticket is **created** and/or **assigned**.
 Each channel can be limited to certain priorities, for example only High and Critical.
 Set **OpsTrack web address** at the top of that page so messages link back to the ticket.
 
@@ -227,12 +227,31 @@ Plain-text messages are delivered only within 24 hours of the recipient messagin
   2. Create an approved *Content template* and enter its SID (`HX…`).
   3. In the Sandbox, you can use plain-text mode after each recipient has joined the sandbox.
 
-Recipients are WhatsApp numbers in international format, one per line or separated by commas.
+**SMS**
+
+The text is one short message, for example
+“[OpsTrack] New ticket INC-1023 (Critical): Email server down. Assignee: Ravi.”, followed by the ticket
+link. It is kept within three SMS segments.
+
+- **Twilio:** enter your Account SID, auth token and sender. The sender can be a Twilio phone number,
+  an alphanumeric sender ID where the destination country allows it, or a Messaging Service SID (`MG…`).
+- **Vonage (Nexmo):** enter your API key and secret and the sender. Vonage reports rejected messages,
+  for example unroutable numbers, in its reply, and OpsTrack shows them as failed in the log.
+- **Other gateway (HTTP API):** works with most local providers, for example MSG91, Textlocal, Fast2SMS,
+  ClickSend or Plivo. Enter the provider's address and, for POST, a JSON or form body. Use the placeholders
+  `{to}` (`+919812345678`), `{to_digits}` (`919812345678`) and `{message}`, plus any header your provider
+  needs, for example `Authorization: Bearer …`. Example JSON body:
+  `{"to": "{to}", "message": "{message}", "sender": "OPSTRK"}`.
+- **India:** business SMS must use a DLT-registered sender ID and a registered message template. Register
+  the OpsTrack text above as a template with your provider, and add any template ID it requires to the
+  address or body.
+
+Recipients are phone numbers in international format, one per line or separated by commas.
 Tick **Also send to the assigned engineer** to message the engineer at the phone number in their
 user profile.
 
 Every send is recorded in the **Delivery log** with the provider's error if it failed. Workflows can
-also send to any channel with the action **Send a Teams / Slack / WhatsApp message**, with optional extra
+also send to any channel with the action **Send a Teams / Slack / WhatsApp / SMS message**, with optional extra
 text that can use `{{ticket.number}}`-style placeholders.
 
 ## Remote management
@@ -300,7 +319,7 @@ lib/auth.js          password hashing (scrypt), sessions, presence, permissions
 lib/seed.js          default profiles, admin user, settings, sample form
 lib/tickets.js       ticket service, workload calculation, notifications
 lib/workflow.js      workflow engine + scheduler
-lib/notify.js        Teams, Slack and WhatsApp (Meta / Twilio) notifications
+lib/notify.js        Teams, Slack, WhatsApp (Meta / Twilio) and SMS (Twilio / Vonage / HTTP) notifications
 lib/remote.js        remote desktop links (MeshCentral / Guacamole / custom) and session logging
 lib/email.js         SMTP (nodemailer) / IMAP (imapflow) channels
 public/              single-page web app (vanilla JS + Chart.js)

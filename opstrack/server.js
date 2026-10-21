@@ -657,10 +657,11 @@ app.post('/api/email-accounts/:id/send-test', requireAuth, requirePerm('email', 
   bad(res, `Send failed: ${last?.detail || 'unknown error'}`);
 });
 
-// ---------- chat notification channels (Teams, Slack, WhatsApp) ----------
+// ---------- notification channels (Teams, Slack, WhatsApp, SMS) ----------
 const NOTIFY_FIELDS = ['name', 'type', 'enabled', 'events', 'priorities', 'webhookUrl', 'phoneNumberId', 'accessToken',
   'accountSid', 'authToken', 'fromNumber', 'recipients', 'notifyAssignee', 'messageMode', 'templateName',
-  'templateLanguage', 'contentSid', 'templateFields', 'mentionCritical'];
+  'templateLanguage', 'contentSid', 'templateFields', 'mentionCritical', 'apiKey', 'apiSecret', 'gatewayUrl',
+  'gatewayMethod', 'gatewayContentType', 'gatewayBody', 'gatewayHeader'];
 
 function cleanChannel(b, existing = {}) {
   const c = pick(b, NOTIFY_FIELDS);
@@ -675,6 +676,17 @@ function cleanChannel(b, existing = {}) {
   if (m.type === 'slack' && !/^https?:\/\/\S+$/i.test(m.webhookUrl || '')) return { error: 'Paste the Slack webhook address (https://hooks.slack.com/services/…)' };
   if (m.type === 'whatsapp_meta' && (!m.phoneNumberId || !m.accessToken)) return { error: 'Phone number ID and access token are required' };
   if (m.type === 'whatsapp_twilio' && (!/^AC\w{32}$/.test(m.accountSid || '') || !m.authToken || !m.fromNumber)) return { error: 'Twilio Account SID (AC…), auth token and WhatsApp sender number are required' };
+  if (m.type === 'sms_twilio' && (!/^AC\w{32}$/.test(m.accountSid || '') || !m.authToken)) return { error: 'Twilio Account SID (AC…) and auth token are required' };
+  if (m.type === 'sms_vonage' && (!m.apiKey || !m.apiSecret)) return { error: 'Vonage API key and API secret are required' };
+  if ((m.type === 'sms_twilio' || m.type === 'sms_vonage') && !/^(\+?\d{6,15}|[A-Za-z0-9 ]{2,11}|MG\w{32})$/.test(m.fromNumber || '')) {
+    return { error: 'Sender must be a phone number, an alphanumeric sender ID (max 11 characters) or a Twilio Messaging Service SID (MG…)' };
+  }
+  if (m.type === 'sms_http') {
+    if (!/^https?:\/\/\S+$/i.test(m.gatewayUrl || '')) return { error: 'Gateway address must start with https://' };
+    const all = `${m.gatewayUrl} ${m.gatewayMethod === 'GET' ? '' : m.gatewayBody || ''}`;
+    if (!/\{to(_digits)?\}/.test(all) || !all.includes('{message}')) return { error: 'The gateway address or body must contain {to} (or {to_digits}) and {message}' };
+  }
+  if (m.type.startsWith('sms') && !String(m.recipients || '').trim() && !m.notifyAssignee) return { error: 'Add at least one phone number, or tick “send to the assigned engineer”' };
   if (m.type.startsWith('whatsapp') && m.messageMode !== 'text') {
     if (m.type === 'whatsapp_meta' && !m.templateName) return { error: 'Enter the approved WhatsApp template name (or choose plain-text mode)' };
     if (m.type === 'whatsapp_twilio' && !/^HX\w{32}$/.test(m.contentSid || '')) return { error: 'Enter the Twilio Content template SID (HX…) (or choose plain-text mode)' };
