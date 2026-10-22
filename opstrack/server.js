@@ -395,7 +395,7 @@ app.post('/api/tickets', requireAuth, requirePerm('tickets', 'create'), (req, re
   const b = req.body || {};
   if (!b.subject) return bad(res, 'Subject is required');
   if (b.assigneeId && !can(req.user, 'tickets', 'assign')) b.assigneeId = null;
-  const t = tickets.create(pick(b, ['subject', 'description', 'category', 'priority', 'assigneeId', 'projectId', 'deviceId', 'requesterName', 'requesterEmail']), req.user, { source: 'web' });
+  const t = tickets.create(pick(b, ['subject', 'description', 'category', 'priority', 'assigneeId', 'projectId', 'deviceId', 'watchers', 'requesterName', 'requesterEmail']), req.user, { source: 'web' });
   res.json(ticketOut(t));
 });
 
@@ -759,6 +759,12 @@ app.put('/api/settings', requireAuth, requirePerm('settings', 'edit'), (req, res
   const b = req.body || {};
   const listKeys = ['activityCategories', 'ticketCategories', 'ticketPriorities', 'ticketStatuses', 'closedStatuses'];
   const patch = pick(b, ['companyName', 'publicUrl', 'ticketPrefix', 'workloadGreenMax', 'dailyTargetHours', 'slaHours', 'notifyOnAssign', 'notifyRequesterOnCreate', ...listKeys]);
+  if (b.emailNotify && typeof b.emailNotify === 'object') {
+    const e = pick(b.emailNotify, ['requesterOnStatus', 'requesterStatuses', 'requesterOnReply', 'assigneeOnUpdate', 'assigneeOnComment', 'watchersOnUpdate']);
+    for (const k of Object.keys(e)) if (k !== 'requesterStatuses') e[k] = e[k] === true;
+    if ('requesterStatuses' in e) e.requesterStatuses = (Array.isArray(e.requesterStatuses) ? e.requesterStatuses : []).filter((x) => settings().ticketStatuses.includes(x));
+    patch.emailNotify = { ...require('./lib/ticketmail').DEFAULTS, ...settings().emailNotify, ...e };
+  }
   if (b.remote && typeof b.remote === 'object') {
     const r = pick(b.remote, ['provider', 'serverUrl', 'embed', 'guacDataSource', 'urlTemplate', 'logToTracker', 'trackerCategory']);
     if ('provider' in r && r.provider && !remote.PROVIDERS[r.provider]) return bad(res, 'Unknown remote desktop provider');

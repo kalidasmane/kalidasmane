@@ -27,6 +27,9 @@ A self-hosted web application for engineering and support teams that combines:
   engineer and activity.
 - **Reports** – Project × Engineer effort summary and detailed log, CSV export.
 - **Team** – directory and reporting-manager org chart.
+- **Email notifications for ticket updates** – requesters hear about status changes and replies,
+  engineers about changes and comments by others, and CC addresses on a ticket get updates too. See
+  [Email notifications](#email-notifications-for-ticket-updates).
 - **Notifications** – new and assigned tickets are posted to Microsoft Teams and Slack
   channels and sent by WhatsApp (Meta Cloud API or Twilio) and SMS (Twilio, Vonage or any HTTP
   SMS gateway), filtered by priority. See [Notifications](#notifications-teams-slack-whatsapp-sms).
@@ -184,6 +187,32 @@ Put it behind HTTPS (nginx, Caddy, IIS, or your cloud's load balancer).
 | `DATABASE_SSL_VERIFY` | `true` | Set to `false` if the database uses a certificate Node.js can't verify |
 | `TRUST_PROXY` | `1` | Number of reverse proxies in front of the app; set to `0` when exposed directly |
 
+## Email notifications for ticket updates
+
+These use your outbound email channel (**Settings → Email**). Choose which ones to send in
+**Settings → Notifications (chat & SMS) → Email notifications for ticket updates**:
+
+| Who | Gets an email when | Default |
+|-----|--------------------|---------|
+| **Requester** | The status changes to one of the ticked statuses (default: In Progress, On Hold, Resolved, Closed) | on |
+| **Requester** | An engineer posts a public reply | on |
+| **Assigned engineer** | Someone else changes the ticket (status, priority, category, description…) | on |
+| **Assigned engineer** | Someone else comments, including requester email replies and internal notes | on |
+| **CC on the ticket** | Status, priority or assignee changes, and public replies | on |
+
+- **CC addresses:** add them in the **Notify also (CC)** field on any ticket, for example the
+  customer's manager. They're stored de-duplicated, and invalid addresses are dropped.
+- **Internal notes** only ever go to the assigned engineer.
+- **Your own changes:** nobody is emailed about a change they made themselves.
+- **What requesters and CCs see:** their emails show only status, priority, assignee and subject
+  changes. They don't include the OpsTrack link, which needs a login. The engineer's email lists every
+  change and links to the ticket.
+- **Replies:** replying to any email (keeping `[INC-1234]` in the subject) adds a comment to the ticket.
+  If the requester replies to a resolved or closed ticket, it reopens. The engineer and CCs then get a
+  single email about the reply, which notes that the ticket was reopened.
+- **Other emails:** the email to an engineer when a ticket is assigned to them, and the acknowledgement to
+  requesters of new email or portal tickets, are set in **Settings → General**.
+
 ## Notifications (Teams, Slack, WhatsApp, SMS)
 
 **Settings → Notifications (chat & SMS)** sends a message whenever a ticket is **created** and/or **assigned**.
@@ -319,6 +348,7 @@ lib/auth.js          password hashing (scrypt), sessions, presence, permissions
 lib/seed.js          default profiles, admin user, settings, sample form
 lib/tickets.js       ticket service, workload calculation, notifications
 lib/workflow.js      workflow engine + scheduler
+lib/ticketmail.js    email notifications for ticket updates and comments
 lib/notify.js        Teams, Slack, WhatsApp (Meta / Twilio) and SMS (Twilio / Vonage / HTTP) notifications
 lib/remote.js        remote desktop links (MeshCentral / Guacamole / custom) and session logging
 lib/email.js         SMTP (nodemailer) / IMAP (imapflow) channels
