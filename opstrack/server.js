@@ -9,6 +9,7 @@ const workflow = require('./lib/workflow');
 const email = require('./lib/email');
 const remote = require('./lib/remote');
 const notify = require('./lib/notify');
+const push = require('./lib/push');
 
 const app = express();
 app.disable('x-powered-by');
@@ -170,6 +171,7 @@ app.delete('/api/users/:id', requireAuth, requirePerm('users', 'delete'), (req, 
   for (const x of db.all('users')) if (x.managerId === u.id) x.managerId = u.managerId || null;
   for (const t of db.all('tickets')) if (t.assigneeId === u.id && !tickets.isClosed(t)) t.assigneeId = null;
   auth.destroyUserSessions(u.id);
+  for (const x of db.where('pushSubs', (p) => p.userId === u.id)) db.remove('pushSubs', x.id);
   db.remove('users', u.id);
   db.log('audit', { userId: req.user.id, action: 'user.delete', target: u.username });
   res.json({ ok: true });
@@ -655,6 +657,36 @@ app.post('/api/email-accounts/:id/send-test', requireAuth, requirePerm('email', 
   const last = db.all('emailLog')[0];
   if (last?.status === 'sent') return res.json({ ok: true, message: `Test email sent to ${last.to}` });
   bad(res, `Send failed: ${last?.detail || 'unknown error'}`);
+});
+
+// ---------- browser push notifications ----------
+app.get('/api/push', requireAuth, (req, res) => {
+  res.json({
+    publicKey: push.publicKey(), prefs: push.prefsFor(req.user),
+    devices: db.where('pushSubs', (x) => x.userId === req.user.id).map((x) => ({ endpoint: x.endpoint, userAgent: x.userAgent, createdAt: x.createdAt, lastUsedAt: x.lastUsedAt })),
+  });
+});
+app.post('/api/push/subscribe', requireAuth, (req, res) => {
+  const r = push.subscribe(req.user, req.body?.subscription, req.headers['user-agent']);
+  if (r.error) return bad(res, r.error);
+  res.json({ ok: true });
+});
+app.post('/api/push/unsubscribe', requireAuth, (req, res) => {
+  push.unsubscribe(req.user, String(req.body?.endpoint || ''));
+  res.json({ ok: true });
+});
+app.put('/api/push/prefs', requireAuth, (req, res) => {
+  const b = req.body || {};
+  const p = push.prefsFor(req.user);
+  for (const k of ['assigned', 'updates', 'comments']) if (k in b) p[k] = b[k] === true;
+  if (['none', 'critical', 'high', 'all'].includes(b.newTickets)) p.newTickets = b.newTickets;
+  db.update('users', req.user.id, { pushPrefs: p });
+  res.json(p);
+});
+app.post('/api/push/test', requireAuth, async (req, res) => {
+  const r = await push.sendToUsers([req.user.id], { title: 'OpsTrack test notification', body: 'Push notifications work on this device.', url: '/#/dashboard', tag: 'test' }, 'test');
+  if (!r.sent) return bad(res, r.failed ? 'Sending failed – see Settings → Notifications log' : 'No device is subscribed yet');
+  res.json({ ok: true, message: `Sent to ${r.sent} device(s)` });
 });
 
 // ---------- notification channels (Teams, Slack, WhatsApp, SMS) ----------
