@@ -1,7 +1,20 @@
 /* Tickets: service-desk queue, detail view, assignment with workload lights. */
 (() => {
   const { esc, icon, fmtMins } = App;
-  const state = { status: 'open', assigneeId: '', priority: '', q: '' };
+  const state = { status: 'open', assigneeId: '', priority: '', sla: '', q: '' };
+  const itil = () => App.meta.itil;
+  const levelOptions = (kind, sel) => App.options(itil().levels.map((l) => ({ value: l, label: `${l} – ${itil()[kind][l]}` })), sel);
+  // Shows the priority the ITIL matrix gives for the chosen impact × urgency.
+  const bindMatrix = (scope) => {
+    const out = scope.querySelector('[data-prio-preview]');
+    const sel = scope.querySelector('select[name=priority]');
+    const upd = () => {
+      const p = itil().matrix?.[scope.querySelector('[name=impact]').value]?.[scope.querySelector('[name=urgency]').value];
+      if (out) out.innerHTML = sel?.value ? 'Priority set by hand' : `Priority from the matrix: ${p ? App.priorityPill(p) : '—'}`;
+    };
+    scope.querySelectorAll('[name=impact],[name=urgency],select[name=priority]').forEach((x) => x.addEventListener('change', upd));
+    upd();
+  };
   const SOURCE_ICON = { web: 'layout', email: 'mail', form: 'form', portal: 'link', automation: 'flow' };
 
   App.openNewTicket = async () => {
@@ -25,7 +38,10 @@
               <label>Requester email<input name="requesterEmail" type="email" value="${esc(App.me.email || '')}"></label>
               <label class="span2">Notify also (CC) <small class="muted">email addresses, comma-separated – they get status updates and replies</small><input name="watchers" placeholder="manager@customer.com, it-lead@yourcompany.com"></label>
               <label>Category<select name="category">${App.options(s.ticketCategories)}</select></label>
-              <label>Priority<select name="priority">${App.options(s.ticketPriorities, 'Medium')}</select></label>
+              <label>Impact <small class="muted">(who is affected)</small><select name="impact">${levelOptions('impact', 'Low')}</select></label>
+              <label>Urgency <small class="muted">(how soon it hurts)</small><select name="urgency">${levelOptions('urgency', 'Medium')}</select></label>
+              <label>Priority<select name="priority">${App.priorityOptions('', { blank: 'Auto – from impact × urgency' })}</select></label>
+              <div class="prio-preview" data-prio-preview></div>
               <label>Project<select name="projectId">${App.projectOptions('')}</select></label>
               ${App.meta.devices?.length ? `<label>Device<select name="deviceId">${App.options(App.meta.devices.map((d) => ({ value: d.id, label: `${d.name}${d.customer ? ` · ${d.customer}` : ''}` })), '', { blank: '— None —' })}</select></label>` : ''}
               ${canAssign ? `<label>Assign to <small class="muted">(hover a light to see workload)</small>${App.userPicker('assigneeId', '')}</label>` : ''}
@@ -36,6 +52,7 @@
             area.innerHTML = `<p class="muted">${esc(f.description || '')}</p><div class="form-grid">${App.renderFormFields(f.fields, { name: App.me.name, email: App.me.email })}</div>`;
           }
           App.enhance(area);
+          if (area.querySelector('[name=impact]')) bindMatrix(area);
         };
         draw('blank');
         form.querySelectorAll('[name=mode]').forEach((r) => r.addEventListener('change', () => draw(r.value)));
@@ -64,6 +81,14 @@
     }
   }).join('');
 
+  // List cell: the clock that matters now (response until answered, then resolution).
+  function slaCell(t) {
+    const c = App.slaClock(t);
+    if (!c) return '—';
+    const which = c === t.sla.response ? 'Response' : 'Resolution';
+    return `<div class="sla-cell" title="${esc(`${which} target ${c.targetText} · due ${App.fmtDateTime(c.dueAt)}`)}">${App.slaBadge(c)}<small>${which} · ${esc(App.slaDue(c))}</small></div>`;
+  }
+
   async function listView(el, alive) {
     const qs = new URLSearchParams(state);
     const list = await App.get(`/api/tickets?${qs}`);
@@ -73,32 +98,36 @@
       <div class="toolbar">
         <div class="search">${icon('search', 16)}<input id="tq" placeholder="Search number, subject, requester…" value="${esc(state.q)}"></div>
         <select id="ts">${App.options([{ value: 'open', label: 'All open' }, { value: '', label: 'All statuses' }, ...s.ticketStatuses.map((x) => ({ value: x, label: x }))], state.status)}</select>
-        <select id="tp">${App.options(s.ticketPriorities, state.priority, { blank: 'All priorities' })}</select>
+        <select id="tp">${App.priorityOptions(state.priority, { blank: 'All priorities' })}</select>
+        <select id="tsla">${App.options([{ value: 'breached', label: 'SLA breached' }, { value: 'at_risk', label: 'SLA at risk' }, { value: 'paused', label: 'SLA paused' }, { value: 'ok', label: 'SLA on track' }], state.sla, { blank: 'Any SLA state' })}</select>
         <select id="ta">${App.options([{ value: 'none', label: 'Unassigned' }, ...App.meta.users.map((u) => ({ value: u.id, label: u.name }))], state.assigneeId, { blank: 'All assignees' })}</select>
         <span class="grow"></span>
         <button class="btn ghost sm" id="csv">${icon('download', 16)} Export</button>
         ${App.can('tickets', 'create') ? `<button class="btn primary" id="new">${icon('plus', 16)} New ticket</button>` : ''}
       </div>
       <div class="card">${list.length ? `<div class="table-wrap"><table class="table hover">
-        <thead><tr><th>Ticket</th><th>Subject</th><th>Requester</th><th>Priority</th><th>Status</th><th>Assignee</th><th>Due</th><th class="num">Time</th></tr></thead>
+        <thead><tr><th>Ticket</th><th>Subject</th><th>Requester</th><th>Priority</th><th>Status</th><th>Assignee</th><th>SLA</th><th class="num">Time</th></tr></thead>
         <tbody>${list.map((t) => `<tr data-open="${t.id}">
           <td class="nowrap"><span class="src" title="via ${esc(t.source)}">${icon(SOURCE_ICON[t.source] || 'ticket', 15)}</span><b>${esc(t.number)}</b></td>
           <td class="subject"><b>${esc(t.subject)}</b><small class="muted">${esc(t.category)}${t.projectName ? ` · ${esc(t.projectName)}` : ''}${t.commentCount ? ` · ${t.commentCount} comment(s)` : ''}</small></td>
           <td>${esc(t.requesterName || '')}<small class="muted">${esc(t.requesterEmail || '')}</small></td>
           <td>${App.priorityPill(t.priority)}</td><td>${App.statusPill(t.status)}</td>
           <td>${App.userChip(App.user(t.assigneeId))}</td>
-          <td class="${t.overdue ? 'bad' : ''}">${t.overdue ? '⚠ ' : ''}${App.fmtDateTime(t.dueAt)}</td>
+          <td>${slaCell(t)}</td>
           <td class="num">${t.timeSpentMinutes ? fmtMins(t.timeSpentMinutes) : '—'}</td></tr>`).join('')}</tbody></table></div>` : App.empty('No tickets found', 'Try changing the filters.')}</div>`;
     const q = el.querySelector('#tq');
     q.addEventListener('input', App.debounce(() => { state.q = q.value; App.render().then(() => { const n = document.getElementById('tq'); n?.focus(); n?.setSelectionRange(n.value.length, n.value.length); }); }, 350));
     el.querySelector('#ts').addEventListener('change', (e) => { state.status = e.target.value; App.render(); });
     el.querySelector('#tp').addEventListener('change', (e) => { state.priority = e.target.value; App.render(); });
+    el.querySelector('#tsla').addEventListener('change', (e) => { state.sla = e.target.value; App.render(); });
     el.querySelector('#ta').addEventListener('change', (e) => { state.assigneeId = e.target.value; App.render(); });
     el.querySelector('#new')?.addEventListener('click', App.openNewTicket);
     el.querySelectorAll('[data-open]').forEach((r) => r.addEventListener('click', () => App.go(`tickets/${r.dataset.open}`)));
     el.querySelector('#csv').addEventListener('click', () => App.downloadCSV('tickets.csv', [
-      ['Number', 'Subject', 'Category', 'Priority', 'Status', 'Assignee', 'Requester', 'Requester email', 'Project', 'Source', 'Created', 'Due', 'Resolved', 'Time spent (h)'],
-      ...list.map((t) => [t.number, t.subject, t.category, t.priority, t.status, t.assigneeName || '', t.requesterName, t.requesterEmail, t.projectName || '', t.source, t.createdAt, t.dueAt, t.resolvedAt || '', App.hours(t.timeSpentMinutes)]),
+      ['Number', 'Subject', 'Category', 'Priority', 'Impact', 'Urgency', 'Status', 'Assignee', 'Requester', 'Requester email', 'Project', 'Source', 'Created',
+        'Response due', 'First response', 'Response SLA', 'Resolution due', 'Resolved', 'Resolution SLA', 'Resolution code', 'Time spent (h)'],
+      ...list.map((t) => [t.number, t.subject, t.category, App.prioLabel(t.priority), t.impact || '', t.urgency || '', t.status, t.assigneeName || '', t.requesterName, t.requesterEmail, t.projectName || '', t.source, t.createdAt,
+        t.sla?.response.dueAt || '', t.firstResponseAt || '', t.sla?.response.state || '', t.dueAt, t.resolvedAt || '', t.sla?.resolution.state || '', t.resolutionCode || '', App.hours(t.timeSpentMinutes)]),
     ]));
   }
 
@@ -114,7 +143,7 @@
       <div class="ticket-layout">
         <div>
           <section class="card ticket-head">
-            <div class="th-top"><span class="tnum">${esc(t.number)}</span>${App.priorityPill(t.priority)}${App.statusPill(t.status)}${t.overdue ? '<span class="pill prio-critical">SLA breached</span>' : ''}<span class="grow"></span>
+            <div class="th-top"><span class="tnum">${esc(t.number)}</span>${App.priorityPill(t.priority)}${App.statusPill(t.status)}${t.slaBreached ? '<span class="pill sla-bad">SLA breached</span>' : ''}${t.reopenCount ? `<span class="tag ghost">reopened ${t.reopenCount}×</span>` : ''}<span class="grow"></span>
               ${App.can('tickets', 'delete') ? `<button class="icon-btn" id="del" title="Delete ticket">${icon('trash', 16)}</button>` : ''}</div>
             <h2>${esc(t.subject)}</h2>
             <p class="muted">Raised by <b>${esc(t.requesterName || '—')}</b> ${t.requesterEmail ? `&lt;${esc(t.requesterEmail)}&gt;` : ''} via ${esc(t.source)}${t.formName ? ` (${esc(t.formName)})` : ''} · ${App.fmtDateTime(t.createdAt)}</p>
@@ -132,10 +161,14 @@
           </section>
         </div>
         <aside>
+          ${slaCard(t)}
           <form class="card side-form" id="props">
             <header><h3>Details</h3></header>
             <label>Status<select name="status" ${canEdit ? '' : 'disabled'}>${App.options(s.ticketStatuses, t.status)}</select></label>
-            <label>Priority<select name="priority" ${canEdit ? '' : 'disabled'}>${App.options(s.ticketPriorities, t.priority)}</select></label>
+            ${App.meta.itil.pauseStatuses.includes(t.status) ? `<label>On-hold reason<select name="holdReason" ${canEdit ? '' : 'disabled'}>${App.options(App.meta.itil.holdReasons, t.holdReason, { blank: '— Choose —' })}</select></label>` : ''}
+            <div class="grid2"><label>Impact<select name="impact" ${canEdit ? '' : 'disabled'} title="${esc(App.meta.itil.impact[t.impact] || '')}">${App.options(App.meta.itil.levels, t.impact)}</select></label>
+            <label>Urgency<select name="urgency" ${canEdit ? '' : 'disabled'} title="${esc(App.meta.itil.urgency[t.urgency] || '')}">${App.options(App.meta.itil.levels, t.urgency)}</select></label></div>
+            <label>Priority <small class="muted">(set by impact × urgency)</small><select name="priority" ${canEdit ? '' : 'disabled'}>${App.priorityOptions(t.priority)}</select></label>
             <label>Category<select name="category" ${canEdit ? '' : 'disabled'}>${App.options(s.ticketCategories, t.category)}</select></label>
             <label>Assignee ${canAssign ? '' : '<small class="muted">(no assign permission)</small>'}${canAssign ? App.userPicker('assigneeId', t.assigneeId) : `<div>${App.userChip(App.user(t.assigneeId))}</div>`}</label>
             ${!t.assigneeId && canEdit && !App.can('tickets', 'assign') ? '<button type="button" class="btn sm" id="take">Assign to me</button>' : ''}
@@ -143,7 +176,8 @@
             <label>Notify also (CC) <small class="muted">emails, comma-separated</small><input name="watchers" value="${esc(t.watchers || '')}" placeholder="name@company.com" ${canEdit ? '' : 'disabled'}></label>
             ${App.meta.devices?.length || t.deviceId ? `<label>Device<select name="deviceId" ${canEdit ? '' : 'disabled'}>${App.options(App.meta.devices.map((d) => ({ value: d.id, label: d.name })), t.deviceId, { blank: '— None —' })}</select></label>` : ''}
             ${t.deviceId && App.can('devices', 'connect') ? `<button type="button" class="btn sm primary remote-btn" id="remote">${icon('monitor', 15)} Remote session to ${esc(t.deviceName || 'device')}</button>` : ''}
-            <dl class="facts"><dt>Due (SLA)</dt><dd class="${t.overdue ? 'bad' : ''}">${App.fmtDateTime(t.dueAt)}</dd><dt>Resolved</dt><dd>${App.fmtDateTime(t.resolvedAt)}</dd><dt>Time spent</dt><dd>${fmtMins(t.timeSpentMinutes)}</dd></dl>
+            <dl class="facts">${t.resolutionCode ? `<dt>Resolution</dt><dd>${esc(t.resolutionCode)}</dd>` : ''}<dt>Resolved</dt><dd>${App.fmtDateTime(t.resolvedAt)}</dd><dt>Time spent</dt><dd>${fmtMins(t.timeSpentMinutes)}</dd></dl>
+            ${t.resolutionNotes ? `<div class="sla-meta"><b>Resolution notes</b><br>${esc(t.resolutionNotes).replace(/\n/g, '<br>')}</div>` : ''}
           </form>
           <section class="card">
             <header><h3>Time logged</h3>${App.can('timesheet', 'create') ? `<button class="btn sm" id="logtime">${icon('clock', 15)} Log time</button>` : ''}</header>
@@ -153,9 +187,19 @@
       </div>`;
 
     const props = el.querySelector('#props');
-    props.addEventListener('change', async () => {
+    props.addEventListener('change', async (ev) => {
       try {
         const f = App.formData(props);
+        // ITIL: resolving / closing records a resolution code and notes.
+        if (ev.target.name === 'status' && s.closedStatuses.includes(f.status) && !s.closedStatuses.includes(t.status) && App.meta.itil.requireResolution) {
+          ev.target.value = t.status;
+          return resolveModal(t, f.status);
+        }
+        if (ev.target.name === 'status' && App.meta.itil.pauseStatuses.includes(f.status) && !App.meta.itil.pauseStatuses.includes(t.status)) {
+          ev.target.value = t.status;
+          return holdModal(t, f.status);
+        }
+        if (ev.target.name === 'impact' || ev.target.name === 'urgency') delete f.priority; // let the matrix decide
         await App.put(`/api/tickets/${t.id}`, f);
         App.toast('Ticket updated');
         await App.refreshMeta();
@@ -179,6 +223,53 @@
       try { await App.del(`/api/tickets/${t.id}`); await App.refreshMeta(); App.go('tickets'); } catch (e) { App.fail(e); }
     });
   }
+
+  function slaCard(t) {
+    const st = t.sla;
+    if (!st) return '';
+    const row = (name, c, note) => `<div class="sla-row"><div class="sla-top"><b>${name}</b>${App.slaBadge(c)}</div>
+      <div class="sla-bar ${c.state}"><i style="width:${c.pct}%"></i></div>
+      <small>Target ${esc(c.targetText)} · due ${App.fmtDateTime(c.dueAt)} · ${esc(App.slaDue(c))}${note ? ` · ${note}` : ''}</small></div>`;
+    return `<section class="card sla-card"><header><h3>SLA</h3>${App.priorityPill(t.priority)}</header><div class="pad">
+      <p class="sla-meta">${st.hours === 'business' ? 'Business hours' : 'Around the clock (24×7)'} · impact ${esc(t.impact || '—')} × urgency ${esc(t.urgency || '—')}</p>
+      ${row('First response', st.response)}
+      ${row('Resolution', st.resolution, st.pausedMinutes ? `paused ${App.fmtDuration(st.pausedMinutes)}` : '')}
+    </div></section>`;
+  }
+
+  function resolveModal(t, status) {
+    App.modal({
+      title: `${status === 'Closed' ? 'Close' : 'Resolve'} ${t.number}`,
+      body: `<div class="form-grid">
+        <label class="span2">Resolution code<select name="resolutionCode" required>${App.options(App.meta.itil.resolutionCodes, t.resolutionCode, { blank: 'Choose…' })}</select></label>
+        <label class="span2">Resolution notes <small class="muted">what was done – shared with the requester in the status email</small><textarea name="resolutionNotes" rows="4" required>${esc(t.resolutionNotes || '')}</textarea></label>
+      </div>`,
+      submitLabel: status === 'Closed' ? 'Close ticket' : 'Resolve ticket',
+      onSubmit: async (f) => {
+        if (!f.resolutionCode || !String(f.resolutionNotes || '').trim()) throw new Error('Choose a resolution code and add resolution notes');
+        await App.put(`/api/tickets/${t.id}`, { ...f, status });
+        App.toast(`${t.number} ${status.toLowerCase()}`);
+        await App.refreshMeta(); App.render();
+      },
+    });
+  }
+
+  function holdModal(t, status) {
+    App.modal({
+      title: `Put ${t.number} on hold`,
+      body: `<p class="muted">The resolution SLA clock stops while the ticket waits, and restarts when it moves on.</p>
+        <label>Reason<select name="holdReason" required>${App.options(App.meta.itil.holdReasons, '', { blank: 'Choose…' })}</select></label>`,
+      submitLabel: 'Put on hold',
+      onSubmit: async (f) => {
+        if (!f.holdReason) throw new Error('Choose a reason');
+        await App.put(`/api/tickets/${t.id}`, { status, holdReason: f.holdReason });
+        App.toast(`${t.number} is on hold`);
+        App.render();
+      },
+    });
+  }
+
+  App.setTicketFilter = (o) => Object.assign(state, { status: 'open', q: '', assigneeId: '', ...o });
 
   App.pages.tickets = {
     title: 'Tickets',

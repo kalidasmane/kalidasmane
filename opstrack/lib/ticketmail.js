@@ -40,7 +40,7 @@ function summary(t, staff) {
   const link = staff ? ticketLink(t) : '';
   return [
     `Ticket: ${t.number} – ${t.subject}`,
-    `Status: ${t.status} · Priority: ${t.priority} · Assignee: ${assignee}`,
+    `Status: ${t.status} · Priority: ${require('./sla').label(t.priority)} · Assignee: ${assignee}`,
     link ? `Open: ${link}` : '',
   ].filter(Boolean).join('\n');
 }
@@ -84,9 +84,12 @@ function onUpdate(t, before, changes, actor) {
   sendAll(list, actorEmail(actor), (r) => {
     const internalView = r.role === 'assignee';
     const lines = internalView ? changes : changes.filter((l) => /^(Status|Priority|Assignee|Subject)/.test(l));
+    // When a ticket is resolved, everyone is told what was done (ITIL resolution notes).
+    const resolution = statusChanged && t.resolutionNotes && db.state.settings.closedStatuses.includes(t.status)
+      ? `Resolution${t.resolutionCode ? ` (${t.resolutionCode})` : ''}:\n${t.resolutionNotes}\n\n` : '';
     const subject = statusChanged ? `[${t.number}] Status changed to ${t.status}: ${t.subject}` : `[${t.number}] Ticket updated: ${t.subject}`;
     const hello = r.name ? `Hello ${r.name},\n\n` : 'Hello,\n\n';
-    const text = `${hello}${by} updated ticket ${t.number}.\n\n${lines.length ? `Changes:\n${lines.map((l) => ` - ${l}`).join('\n')}\n\n` : ''}${summary(t, internalView)}${footer(t)}`;
+    const text = `${hello}${by} updated ticket ${t.number}.\n\n${lines.length ? `Changes:\n${lines.map((l) => ` - ${l}`).join('\n')}\n\n` : ''}${resolution}${summary(t, internalView)}${footer(t)}`;
     return { subject, text };
   });
 }

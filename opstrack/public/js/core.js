@@ -123,7 +123,30 @@ window.App = (() => {
     ? `<span class="user-chip">${App.avatar(u, 26)}<span>${esc(u.name)}</span>${light ? App.light(u) : ''}</span>`
     : '<span class="muted">Unassigned</span>');
   App.pill = (text, kind = '') => `<span class="pill ${kind}">${esc(text)}</span>`;
-  App.priorityPill = (p) => App.pill(p, `prio-${String(p).toLowerCase()}`);
+  // ITIL priorities: P1 is the most urgent (the settings list is ordered lowest → highest).
+  App.prioCode = (p) => { const l = App.meta?.settings?.ticketPriorities || []; const i = l.indexOf(p); return i < 0 ? '' : `P${l.length - i}`; };
+  App.prioLabel = (p) => (App.prioCode(p) ? `${App.prioCode(p)} – ${p}` : String(p ?? ''));
+  App.priorityOptions = (sel, opts) => App.options([...(App.meta.settings.ticketPriorities || [])].reverse().map((p) => ({ value: p, label: App.prioLabel(p) })), sel, opts);
+  App.priorityPill = (p) => `<span class="pill prio-${esc(String(p).toLowerCase())}">${App.prioCode(p) ? `<b>${App.prioCode(p)}</b> ` : ''}${esc(p)}</span>`;
+  App.fmtDuration = (m) => {
+    m = Math.round(Math.abs(m));
+    if (m < 60) return `${m}m`;
+    if (m < 1440) return `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}`;
+    const d = Math.floor(m / 1440); const h = Math.floor((m % 1440) / 60);
+    return `${d}d${h ? ` ${h}h` : ''}`;
+  };
+  const SLA_STATE = { on_track: ['On track', 'sla-ok'], at_risk: ['At risk', 'sla-risk'], breached: ['Breached', 'sla-bad'], met: ['Met', 'sla-met'], paused: ['Paused', 'sla-paused'] };
+  App.slaBadge = (clock, prefix = '') => { const [l, c] = SLA_STATE[clock?.state] || ['—', '']; return `<span class="pill ${c}">${esc(prefix)}${l}</span>`; };
+  // "due in 2h 5m" / "overdue by 1d 3h" / "met"
+  App.slaDue = (clock) => {
+    if (!clock) return '';
+    if (clock.doneAt) return `${clock.state === 'met' ? 'met' : 'missed'} · ${App.fmtDateTime(clock.doneAt)}`;
+    if (clock.state === 'paused') return 'clock paused';
+    const diff = (new Date(clock.dueAt) - Date.now()) / 60000;
+    return diff >= 0 ? `due in ${App.fmtDuration(diff)}` : `overdue by ${App.fmtDuration(diff)}`;
+  };
+  // The clock that matters now: the response until someone has responded, then the resolution.
+  App.slaClock = (t) => (t.sla ? (t.sla.response.doneAt ? t.sla.resolution : t.sla.response) : null);
   App.statusPill = (s) => App.pill(s, `st-${String(s).toLowerCase().replace(/\s+/g, '-')}`);
   App.empty = (title, sub = '', action = '') => `<div class="empty"><div class="empty-art">${App.icon('layout', 40)}</div><h3>${esc(title)}</h3><p>${esc(sub)}</p>${action}</div>`;
 

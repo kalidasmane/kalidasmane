@@ -29,6 +29,7 @@
     { id: 'tstatus', title: 'Open tickets by status', span: 4 },
     { id: 'tprio', title: 'Open tickets by priority', span: 4 },
     { id: 'workload', title: 'Team workload', span: 4 },
+    { id: 'sla', title: 'SLA performance by priority', span: 12 },
     { id: 'recent', title: 'Latest tracker updates', span: 8 },
     { id: 'compliance', title: 'Not logged today', span: 4 },
   ];
@@ -92,7 +93,8 @@
           ${kpi('Today', hours(k.todayMinutes), `team target ${hours(target * Math.max(1, k.totalUsers))}h`, 'sun')}
           ${kpi('Project work', hours(k.projectMinutes), `${k.totalMinutes ? Math.round(k.projectMinutes / k.totalMinutes * 100) : 0}% of effort`, 'folder', 'indigo')}
           ${kpi('Customer support', hours(k.supportMinutes), `${k.totalMinutes ? Math.round(k.supportMinutes / k.totalMinutes * 100) : 0}% of effort`, 'mail', 'amber')}
-          ${kpi('Open tickets', k.openTickets, `<span class="${k.overdueTickets ? 'bad' : ''}">${k.overdueTickets} overdue</span> · ${k.createdTickets} new`, 'ticket', k.overdueTickets ? 'red' : '')}
+          ${kpi('Open tickets', k.openTickets, `<span class="${k.overdueTickets ? 'bad' : ''}">${k.overdueTickets} SLA breached</span> · ${k.createdTickets} new`, 'ticket', k.overdueTickets ? 'red' : '')}
+          ${kpi('SLA compliance', k.slaCompliance == null ? '—' : `${k.slaCompliance}%`, 'response & resolution targets met in range', 'clock', k.slaCompliance == null || k.slaCompliance >= 90 ? 'green' : k.slaCompliance >= 75 ? 'amber' : 'red')}
           ${kpi('Resolved', k.resolvedTickets, `avg ${k.avgResolutionHours}h to resolve`, 'form', 'green')}
           ${kpi('Online now', `${k.onlineUsers}<em>/${k.totalUsers}</em>`, `${k.activeProjects} active projects`, 'users', 'green')}
         </div>`;
@@ -163,7 +165,21 @@
         });
       };
       if (body('tstatus')) barChart('tstatus', d.ticketsByStatus, { New: '#0ea5e9', Open: '#4f46e5', 'In Progress': '#f59e0b', 'On Hold': '#94a3b8' });
-      if (body('tprio')) barChart('tprio', d.ticketsByPriority, { Low: '#10b981', Medium: '#0ea5e9', High: '#f59e0b', Critical: '#ef4444' });
+      if (body('tprio')) barChart('tprio', d.ticketsByPriority, Object.fromEntries(Object.entries({ Low: '#10b981', Medium: '#0ea5e9', High: '#f59e0b', Critical: '#ef4444' }).map(([p, c]) => [App.prioLabel(p), c])));
+
+      if (body('sla')) {
+        const pctCell = (v) => (v == null ? '<span class="muted">—</span>' : `<span class="pct ${v >= 90 ? 'good' : v >= 75 ? 'warn' : 'bad'}">${v}%</span>`);
+        const d2 = (m, biz) => (biz && m >= 60 ? `${+(m / 60).toFixed(1)}h` : App.fmtDuration(m)); // business time reads as working hours
+        const tgt = (p) => `${d2(p.policy.response, p.policy.hours === 'business')} / ${d2(p.policy.resolution, p.policy.hours === 'business')}${p.policy.hours === 'business' ? ' <small class="muted">business hrs</small>' : ' <small class="muted">24×7</small>'}`;
+        body('sla').innerHTML = `<div class="table-wrap"><table class="table sla-table">
+          <thead><tr><th>Priority</th><th>Targets (response / resolution)</th><th class="num">Response met</th><th class="num">Resolution met</th><th class="num">Open</th><th class="num">At risk</th><th class="num">Breached</th></tr></thead>
+          <tbody>${d.sla.map((r) => `<tr><td>${App.priorityPill(r.priority)}</td><td>${tgt(r)}</td>
+            <td class="num">${pctCell(r.responsePct)} <small class="muted">${r.response.met}/${r.response.met + r.response.missed}</small></td>
+            <td class="num">${pctCell(r.resolutionPct)} <small class="muted">${r.resolution.met}/${r.resolution.met + r.resolution.missed}</small></td>
+            <td class="num">${r.open}</td><td class="num">${r.atRisk ? `<span class="pill sla-risk">${r.atRisk}</span>` : 0}</td><td class="num">${r.breached ? `<a href="#/tickets" data-slabreach class="pill sla-bad">${r.breached}</a>` : 0}</td></tr>`).join('')}</tbody></table></div>`;
+        sub('sla', 'met vs. missed in the selected range · open tickets right now');
+        body('sla').querySelectorAll('[data-slabreach]').forEach((a) => a.addEventListener('click', () => App.setTicketFilter({ sla: 'breached', priority: '' })));
+      }
 
       if (body('workload')) {
         const us = [...App.meta.users].sort((a, b) => b.workload.count - a.workload.count);

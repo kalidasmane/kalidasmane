@@ -110,6 +110,18 @@ const TICKETS = [
   ['Kubernetes pods restarting in the staging namespace', 'Incident', 'Medium', 'New', null, 'automation', 'Monitoring', 'K8S'],
 ];
 
+// SLA timeline per ticket (same order as TICKETS): hours since it was raised, minutes to the
+// first response (null = not yet), hours to resolution — so the demo shows every SLA state.
+const TIMELINE = [
+  [3.3, 12, null], [11, null, null], [2, null, null], [30, 45, null], [50, 25, 20], [6, 25, null], [26, 20, 5], [0.3, null, null],
+  [20, 10, null], [0.4, null, null], [5, 20, null], [6, 20, null], [120, 90, 30], [1, null, null], [0.5, null, null],
+];
+const RESOLUTION = {
+  'Install Visio and Power BI Desktop': ['Fixed', 'Installed Visio Plan 2 and Power BI Desktop from Company Portal; licence assigned.'],
+  'Reset MFA and password for a locked account': ['Fixed', 'Identity verified by phone, MFA methods reset and a temporary password issued.'],
+  'Shared drive quota increase for Marketing': ['Fixed', 'Quota raised from 500 GB to 1 TB after manager approval.'],
+};
+
 async function main() {
   await db.load();
   seed();
@@ -230,15 +242,25 @@ async function main() {
 
   // ---------- tickets ----------
   const tickets = require('../lib/tickets');
-  for (const [subject, category, priority, status, assignee, source, requester, code] of TICKETS) {
+  const sla = require('../lib/sla');
+  for (const [i, [subject, category, priority, status, assignee, source, requester, code]] of TICKETS.entries()) {
+    const [ageH, respMin, resolveH] = TIMELINE[i];
+    const created = Date.now() - ageH * 3600000;
     const t = tickets.create({
       subject, description: `${subject}. Reported by ${requester}.`, category, priority,
       assigneeId: uid(assignee), requesterName: requester,
       requesterEmail: `${requester.toLowerCase().replace(/[^a-z]+/g, '.')}@customer.example`,
       projectId: code ? byCode[code].id : null,
       deviceId: ticketDevice[subject] ? byDevice[ticketDevice[subject]].id : null,
-    }, admin, { source, skipWorkflows: true });
-    if (status !== 'New') tickets.update(t, { status }, admin, { skipWorkflows: true });
+    }, admin, { source, skipWorkflows: true, createdAt: new Date(created).toISOString() });
+    const [resCode, resNotes] = RESOLUTION[subject] || [];
+    if (status !== 'New') {
+      tickets.update(t, { status, ...(resCode ? { resolutionCode: resCode, resolutionNotes: resNotes } : {}), ...(status === 'On Hold' ? { holdReason: 'Awaiting third party / vendor' } : {}) }, admin, { skipWorkflows: true, quietEmail: true });
+    }
+    t.firstResponseAt = respMin == null ? null : new Date(created + respMin * 60000).toISOString();
+    if (resolveH) t.resolvedAt = new Date(created + resolveH * 3600000).toISOString();
+    if (t.slaPausedAt) t.slaPausedAt = new Date(created + 3 * 3600000).toISOString();
+    sla.markCurrent(t); // don't send warnings for the demo's history
     // Log some time against tickets that are being worked on.
     if (t.assigneeId && ['In Progress', 'Resolved', 'Closed'].includes(status)) {
       db.insert('timesheets', {
@@ -269,6 +291,13 @@ async function main() {
     enabled: true, trigger: 'ticket.created', matchType: 'any', order: 3, runCount: 0,
     conditions: [{ field: 'subject', op: 'contains', value: 'phishing, malware, virus, ransomware' }],
     actions: [{ type: 'assign_user', userId: uid('rohan') }, { type: 'set_category', value: 'Security' }, { type: 'set_priority', value: 'Critical' }],
+  });
+  db.insert('workflows', {
+    name: 'Escalate breached P1 / P2 tickets', description: 'ITIL functional escalation: a breached Critical or High ticket goes to the team lead and the manager is emailed.',
+    enabled: true, trigger: 'sla.breached', matchType: 'any', order: 5, runCount: 0,
+    conditions: [{ field: 'priority', op: 'equals', value: 'Critical' }, { field: 'priority', op: 'equals', value: 'High' }],
+    actions: [{ type: 'add_comment', text: 'Escalated by SLA policy: {{ticket.priority}} target missed.' },
+      { type: 'send_email', to: 'manager', subject: 'SLA breached on {{ticket.number}}', body: '{{ticket.subject}} ({{ticket.priority}}) has missed its SLA. Assignee: {{assignee.name}}.' }],
   });
   db.insert('workflows', {
     name: 'Daily server health check ticket', description: 'Creates a health-check ticket every weekday at 09:00.',

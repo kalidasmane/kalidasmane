@@ -9,6 +9,7 @@
     { id: 'notifications', label: 'Notifications (chat & SMS)', icon: 'chat', perm: 'notifications' },
     { id: 'workflows', label: 'Workflow Automation', icon: 'flow', perm: 'workflows' },
     { id: 'remote', label: 'Remote Desktop', icon: 'monitor', perm: 'settings' },
+    { id: 'sla', label: 'SLA & Priority (ITIL)', icon: 'clock', perm: 'settings' },
     { id: 'general', label: 'General', icon: 'sliders', perm: 'settings' },
     { id: 'audit', label: 'Audit log', icon: 'list', perm: 'settings' },
   ];
@@ -142,7 +143,7 @@
           <label>Form name<input name="name" value="${esc(fm.name || '')}" required></label>
           <label>Ticket category<select name="category">${App.options(s.ticketCategories, fm.category)}</select></label>
           <label class="span2">Description<input name="description" value="${esc(fm.description || '')}"></label>
-          <label>Default priority<select name="defaultPriority">${App.options(s.ticketPriorities, fm.defaultPriority || 'Medium')}</select></label>
+          <label>Default priority<select name="defaultPriority">${App.priorityOptions(fm.defaultPriority || 'Medium')}</select></label>
           <label>Link to project<select name="projectId">${App.projectOptions(fm.projectId)}</select></label>
           <label>Default assignee${App.userPicker('defaultAssigneeId', fm.defaultAssigneeId, { placeholder: 'Leave to workflows' })}</label>
           <div class="checks"><label class="check"><input type="checkbox" name="active" ${fm.active !== false ? 'checked' : ''}> Active</label>
@@ -283,7 +284,7 @@
     const wm = App.meta.workflowMeta;
     const s = App.meta.settings;
     const emailAccs = App.can('email') ? (await App.get('/api/email-accounts')).accounts.filter((a) => a.direction === 'inbound') : [];
-    const FIELDS = [['subject', 'Subject'], ['description', 'Description'], ['priority', 'Priority'], ['status', 'Status'], ['category', 'Category'], ['source', 'Source (web/email/form/portal/automation)'], ['requesterEmail', 'Requester email'], ['assigneeId', 'Assignee'], ['projectId', 'Project'], ['formId', 'Form']];
+    const FIELDS = [['subject', 'Subject'], ['description', 'Description'], ['priority', 'Priority'], ['impact', 'Impact'], ['urgency', 'Urgency'], ['status', 'Status'], ['slaTarget', 'SLA target (response / resolution) – SLA triggers'], ['category', 'Category'], ['source', 'Source (web/email/form/portal/automation)'], ['requesterEmail', 'Requester email'], ['assigneeId', 'Assignee'], ['projectId', 'Project'], ['formId', 'Form']];
     const condRow = (c = {}) => `<div class="builder-row cond">
       <select data-k="field">${App.options(FIELDS.map(([v, l]) => ({ value: v, label: l })), c.field)}<option value="${c.field?.startsWith('formData.') ? esc(c.field) : 'formData.'}" ${c.field?.startsWith('formData.') ? 'selected' : ''}>Form field…</option></select>
       <select data-k="op">${App.options(Object.entries(wm.operators).map(([v, l]) => ({ value: v, label: l })), c.op || 'equals')}</select>
@@ -296,7 +297,7 @@
         case 'assign_round_robin':
         case 'assign_least_loaded': return `<label>Limit to profile<select data-k="profileId">${App.options(App.meta.profiles.map((p) => ({ value: p.id, label: p.name })), a.profileId, { blank: 'Any profile' })}</select></label>
           <label class="check"><input type="checkbox" data-k="onlineOnly" ${a.onlineOnly ? 'checked' : ''}> Prefer online users</label><div class="span2"><small class="muted">Group (leave empty for everyone matching the profile):</small>${userMulti(a.userIds)}</div>`;
-        case 'set_priority': return `<label>Priority<select data-k="value">${App.options(s.ticketPriorities, a.value)}</select></label>`;
+        case 'set_priority': return `<label>Priority<select data-k="value">${App.priorityOptions(a.value)}</select></label>`;
         case 'set_status': return `<label>Status<select data-k="value">${App.options(s.ticketStatuses, a.value)}</select></label>`;
         case 'set_category': return `<label>Category<select data-k="value">${App.options(s.ticketCategories, a.value)}</select></label>`;
         case 'set_project': return `<label>Project<select data-k="projectId">${App.projectOptions(a.projectId, 'Select…')}</select></label>`;
@@ -309,7 +310,7 @@
           : '<p class="muted span2">No notification channels yet – add one under Settings → Notifications (chat &amp; SMS).</p>';
         case 'create_ticket': return `<label class="span2">Subject<input data-k="subject" value="${esc(a.subject || '')}" placeholder="e.g. Weekly backup verification – {{date}}"></label>
           <label class="span2">Description<textarea data-k="description" rows="2">${esc(a.description || '')}</textarea></label>
-          <label>Priority<select data-k="priority">${App.options(s.ticketPriorities, a.priority || 'Medium')}</select></label><label>Category<select data-k="category">${App.options(s.ticketCategories, a.category)}</select></label>
+          <label>Priority<select data-k="priority">${App.priorityOptions(a.priority || 'Medium')}</select></label><label>Category<select data-k="category">${App.options(s.ticketCategories, a.category)}</select></label>
           <label>Project<select data-k="projectId">${App.projectOptions(a.projectId)}</select></label><label>Assign to${App.userPicker('assigneeId', a.assigneeId)}</label>`;
         default: return '';
       }
@@ -439,7 +440,7 @@
       <label class="span2">Ticket categories<input name="ticketCategories" value="${esc(s.ticketCategories.join(', '))}"></label>
       <label class="span2">Ticket statuses<input name="ticketStatuses" value="${esc(s.ticketStatuses.join(', '))}"></label>
       <label class="span2">Statuses that count as closed<input name="closedStatuses" value="${esc(s.closedStatuses.join(', '))}"></label>
-      <fieldset class="span2"><legend>SLA – hours to resolve by priority</legend><div class="grid4">${s.ticketPriorities.map((p) => `<label>${esc(p)}<input type="number" min="1" data-sla="${esc(p)}" value="${esc(s.slaHours?.[p] ?? 24)}"></label>`).join('')}</div></fieldset>
+      <p class="span2 muted">Priorities, response and resolution targets, business hours and escalation are under <a href="#/settings/sla">SLA &amp; Priority (ITIL)</a>.</p>
       <label class="check"><input type="checkbox" name="notifyOnAssign" ${s.notifyOnAssign ? 'checked' : ''}> Email engineers when a ticket is assigned to them</label>
       <label class="check"><input type="checkbox" name="notifyRequesterOnCreate" ${s.notifyRequesterOnCreate ? 'checked' : ''}> Send acknowledgement to requesters (email / portal tickets)</label>
     </div>${canEdit ? '<footer><button class="btn primary" type="submit">Save settings</button></footer>' : ''}</form>`;
@@ -449,11 +450,80 @@
     f.addEventListener('submit', async (e) => {
       e.preventDefault();
       const body = App.formData(f);
-      body.slaHours = {};
-      f.querySelectorAll('[data-sla]').forEach((i) => { body.slaHours[i.dataset.sla] = Number(i.value); });
       body.workloadGreenMax = Number(body.workloadGreenMax); body.dailyTargetHours = Number(body.dailyTargetHours);
       try { await App.put('/api/settings', body); App.toast('Settings saved'); await App.refreshMeta(); document.querySelector('.sidebar .brand span:last-child').textContent = App.meta.settings.companyName; App.render(); } catch (err) { App.fail(err); }
     });
+  }
+
+  // ================= SLA & PRIORITY (ITIL) =================
+  async function slaTab(el) {
+    const s = await App.get('/api/settings');
+    const it = App.meta.itil;
+    const canEdit = App.can('settings', 'edit');
+    const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    let zones = [];
+    try { zones = Intl.supportedValuesOf('timeZone'); } catch { /* older browsers */ }
+    const prios = [...s.ticketPriorities].reverse(); // P1 first
+    const draw = (c) => {
+      const bh = c.businessHours;
+      const dayLen = (() => { const [a, b] = [bh.start, bh.end].map((x) => { const [h, m] = x.split(':').map(Number); return h * 60 + m; }); return Math.max(0, b - a); })();
+      const dur = (m) => (m % 60 ? { v: m, u: 'm' } : { v: m / 60, u: 'h' });
+      const durInput = (p, k) => { const d = dur(Number(c.policies[p]?.[k] ?? 60)); return `<input type="number" min="1" step="1" data-pol="${esc(p)}" data-k="${k}" value="${d.v}"><select data-pol="${esc(p)}" data-k="${k}Unit">${App.options([{ value: 'm', label: 'minutes' }, { value: 'h', label: 'hours' }], d.u)}</select>`; };
+      el.innerHTML = `<form class="settings-form" id="slf">
+        <section class="card"><header><h3>Priority matrix – impact × urgency</h3></header><div class="pad">
+          <p class="muted">ITIL sets a ticket's priority from its <b>impact</b> (how many people or how much of the business is affected) and its <b>urgency</b> (how quickly it hurts). P1 is the most urgent.</p>
+          <div class="table-wrap"><table class="matrix-table"><thead><tr><th class="rowh">Impact ↓ / Urgency →</th>${it.levels.map((u) => `<th title="${esc(it.urgency[u])}">${u}<br><small class="muted">${esc(it.urgency[u])}</small></th>`).join('')}</tr></thead>
+          <tbody>${it.levels.map((i) => `<tr><th class="rowh" title="${esc(it.impact[i])}">${i}<br><small class="muted">${esc(it.impact[i])}</small></th>${it.levels.map((u) => `<td><select data-mx="${i}|${u}">${App.priorityOptions(c.matrix?.[i]?.[u])}</select></td>`).join('')}</tr>`).join('')}</tbody></table></div>
+        </div></section>
+
+        <section class="card"><header><h3>Service level targets</h3></header><div class="pad">
+          <p class="muted"><b>Response</b>: the first reply to the requester, or moving the ticket on from New/Open. <b>Resolution</b>: the ticket reaches ${esc(s.closedStatuses.join(' or '))}. Business-hours targets only count working time (${App.fmtDuration(dayLen)} per working day).</p>
+          <div class="table-wrap"><table class="table sla-policy"><thead><tr><th>Priority</th><th>Response within</th><th>Resolve within</th><th>Clock</th></tr></thead>
+          <tbody>${prios.map((p) => `<tr><td>${App.priorityPill(p)}</td><td class="nowrap">${durInput(p, 'response')}</td><td class="nowrap">${durInput(p, 'resolution')}</td>
+            <td><select data-pol="${esc(p)}" data-k="hours">${App.options([{ value: '24x7', label: '24×7 (around the clock)' }, { value: 'business', label: 'Business hours' }], c.policies[p]?.hours || '24x7')}</select></td></tr>`).join('')}</tbody></table></div>
+        </div></section>
+
+        <section class="card"><header><h3>Business hours</h3></header><div class="pad form-grid">
+          <label>Time zone<input name="timezone" list="tzlist" value="${esc(bh.timezone)}"><datalist id="tzlist">${zones.map((z) => `<option value="${esc(z)}">`).join('')}</datalist></label>
+          <div class="grid2"><label>Start<input type="time" name="start" value="${esc(bh.start)}"></label><label>End<input type="time" name="end" value="${esc(bh.end)}"></label></div>
+          <div class="span2"><span class="lbl">Working days</span><div class="days-row">${DAYS.map((d, i) => `<label class="check inline"><input type="checkbox" data-day="${i}" ${bh.days.includes(i) ? 'checked' : ''}> ${d}</label>`).join('')}</div></div>
+          <label class="span2">Holidays <small class="muted">(no SLA time counts on these days for business-hours targets; one date per line, YYYY-MM-DD)</small><textarea name="holidays" rows="3" placeholder="2026-12-25">${esc((c.holidays || []).join('\n'))}</textarea></label>
+        </div></section>
+
+        <section class="card"><header><h3>Pending, escalation and closure</h3></header><div class="pad form-grid">
+          <div class="span2"><span class="lbl">Statuses that pause the resolution clock (pending)</span><div class="days-row">${s.ticketStatuses.filter((x) => !s.closedStatuses.includes(x)).map((x) => `<label class="check inline"><input type="checkbox" data-pause="${esc(x)}" ${c.pauseStatuses.includes(x) ? 'checked' : ''}> ${esc(x)}</label>`).join('')}</div></div>
+          <label>Warn when this much of a target is used (%)<input type="number" min="10" max="99" name="warnAt" value="${esc(c.warnAt)}"></label>
+          <label>Close resolved tickets automatically after (days, 0 = never)<input type="number" min="0" max="90" name="autoCloseDays" value="${esc(c.autoCloseDays)}"></label>
+          <label class="check span2"><input type="checkbox" name="escalateToManager" ${c.escalateToManager ? 'checked' : ''}> Escalate breaches to the assignee's reporting manager (unassigned tickets go to everyone who can assign tickets)</label>
+          <label class="check span2"><input type="checkbox" name="requireResolution" ${c.requireResolution ? 'checked' : ''}> Require a resolution code and notes before a ticket is resolved or closed</label>
+          <p class="span2 muted">Warnings and breaches appear in the ticket history and the notification bell, can be sent to Teams / Slack / WhatsApp / SMS channels (events “SLA at risk” and “SLA breached”), and can start workflows (triggers “SLA is at risk” and “SLA is breached”) for functional escalation, e.g. reassign or raise the priority.</p>
+        </div></section>
+        ${canEdit ? `<div class="row"><button type="button" class="btn ghost" id="sreset">Reset to ITIL defaults</button><span class="grow"></span><button class="btn primary" type="submit">Save SLA settings</button></div>` : ''}
+      </form>`;
+      const f = el.querySelector('#slf');
+      if (!canEdit) f.querySelectorAll('input,select,textarea').forEach((i) => { i.disabled = true; });
+      f.querySelector('#sreset')?.addEventListener('click', () => draw(JSON.parse(JSON.stringify({ ...it.defaults, businessHours: { ...it.defaults.businessHours, timezone: bh.timezone } }))));
+      f.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const v = App.formData(f);
+        const matrix = {};
+        f.querySelectorAll('[data-mx]').forEach((x) => { const [i, u] = x.dataset.mx.split('|'); (matrix[i] ||= {})[u] = x.value; });
+        const policies = {};
+        for (const p of prios) {
+          const get = (k) => f.querySelector(`[data-pol="${CSS.escape(p)}"][data-k="${k}"]`).value;
+          const mins = (k) => Number(get(k)) * (get(`${k}Unit`) === 'h' ? 60 : 1);
+          policies[p] = { response: mins('response'), resolution: mins('resolution'), hours: get('hours') };
+        }
+        const body = { sla: {
+          matrix, policies,
+          businessHours: { timezone: v.timezone, start: v.start, end: v.end, days: [...f.querySelectorAll('[data-day]:checked')].map((x) => Number(x.dataset.day)) },
+          holidays: String(v.holidays || ''), pauseStatuses: [...f.querySelectorAll('[data-pause]:checked')].map((x) => x.dataset.pause),
+          warnAt: Number(v.warnAt), autoCloseDays: Number(v.autoCloseDays), escalateToManager: !!v.escalateToManager, requireResolution: !!v.requireResolution,
+        } };
+        try { await App.put('/api/settings', body); App.toast('SLA settings saved – open tickets were recalculated'); await App.refreshMeta(); App.render(); } catch (err) { App.fail(err); }
+      });
+    };
+    draw(JSON.parse(JSON.stringify(s.sla)));
   }
 
   // ================= REMOTE DESKTOP =================
@@ -513,7 +583,7 @@
     const outbound = App.can('email') ? (await App.get('/api/email-accounts').catch(() => ({ accounts: [] }))).accounts.filter((a) => a.direction === 'outbound' && a.enabled) : null;
     const noOutbound = outbound !== null && !outbound.length;
     const nm = App.meta.notifyMeta;
-    const prios = App.meta.settings.ticketPriorities;
+    const prios = [...App.meta.settings.ticketPriorities].reverse();
     const fieldHelp = Object.entries(nm.templateFields).map(([k, v]) => `<code>${k}</code> ${esc(v)}`).join(' · ');
     function channelModal(c = { type: 'teams', enabled: true, events: ['ticket.created'], priorities: [], messageMode: 'template', templateLanguage: 'en', templateFields: 'number,subject,priority,assignee' }) {
       App.modal({
@@ -565,7 +635,7 @@
           </div>
           <fieldset class="span2"><legend>Send when</legend>
             ${Object.entries(nm.events).map(([v, l]) => `<label class="check inline"><input type="checkbox" data-ev value="${v}" ${(c.events || []).includes(v) ? 'checked' : ''}> ${esc(l)}</label>`).join('')}
-            <div class="row" style="margin-top:8px"><small class="muted">Only these priorities (none ticked = all):</small> ${prios.map((p) => `<label class="check inline"><input type="checkbox" data-pr value="${esc(p)}" ${(c.priorities || []).includes(p) ? 'checked' : ''}> ${esc(p)}</label>`).join('')}</div>
+            <div class="row" style="margin-top:8px"><small class="muted">Only these priorities (none ticked = all):</small> ${prios.map((p) => `<label class="check inline"><input type="checkbox" data-pr value="${esc(p)}" ${(c.priorities || []).includes(p) ? 'checked' : ''}> ${esc(App.prioLabel(p))}</label>`).join('')}</div>
           </fieldset>
           <label class="check"><input type="checkbox" name="enabled" ${c.enabled !== false ? 'checked' : ''}> Enabled</label>
         </div>`,
@@ -656,7 +726,7 @@
     el.innerHTML = `<div class="card">${list.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>When</th><th>User</th><th>Action</th><th>Target</th></tr></thead><tbody>${list.map((a) => `<tr><td>${App.fmtDateTime(a.at)}</td><td>${esc(a.userName || '—')}</td><td><code>${esc(a.action)}</code></td><td>${esc(a.target || '')}</td></tr>`).join('')}</tbody></table></div>` : App.empty('No audit entries')}</div>`;
   }
 
-  const RENDER = { users: usersTab, profiles: profilesTab, forms: formsTab, email: emailTab, workflows: workflowsTab, general: generalTab, remote: remoteTab, notifications: notificationsTab, audit: auditTab };
+  const RENDER = { users: usersTab, profiles: profilesTab, forms: formsTab, email: emailTab, workflows: workflowsTab, general: generalTab, sla: slaTab, remote: remoteTab, notifications: notificationsTab, audit: auditTab };
 
   App.pages.settings = {
     title: 'Settings',

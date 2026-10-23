@@ -8,6 +8,8 @@ const TRIGGERS = {
   'ticket.updated': 'Ticket is updated',
   'form.submitted': 'Form is submitted',
   'email.received': 'Email received on an inbound channel',
+  'sla.warning': 'SLA is at risk (warning threshold reached)',
+  'sla.breached': 'SLA is breached (escalation)',
   schedule: 'On a schedule (automatic ticket creation)',
 };
 
@@ -177,7 +179,9 @@ function run(trigger, t, ctx = {}) {
     .sort((a, b) => (a.order || 0) - (b.order || 0));
   for (const wf of list) {
     if (trigger === 'email.received' && wf.emailAccountId && wf.emailAccountId !== ctx.account?.id) continue;
-    if (matches(wf, t, ctx.before)) runOne(wf, t, { trigger });
+    // SLA triggers can be filtered on which target (response / resolution) is affected.
+    const subject = ctx.slaTarget ? { ...t, slaTarget: ctx.slaTarget } : t;
+    if (matches(wf, subject, ctx.before)) runOne(wf, t, { trigger });
   }
 }
 
