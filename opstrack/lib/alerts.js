@@ -3,7 +3,7 @@
 // as a push notification to any devices the user has turned push on for.
 const db = require('./db');
 
-const DEFAULT_PREFS = { assigned: true, updates: true, comments: true, mentions: true, sla: true, newTickets: 'none' }; // newTickets: none | critical | high | all
+const DEFAULT_PREFS = { assigned: true, updates: true, comments: true, mentions: true, sla: true, approvals: true, newTickets: 'none' }; // newTickets: none | critical | high | all
 const PRIORITY_RANK = { critical: ['Critical'], high: ['High', 'Critical'] };
 
 function prefsFor(user) {
@@ -80,4 +80,54 @@ function slaEvent(t, kind, target, text) {
   deliver(users.map((u) => u.id), t, { title: `${t.number}: ${text}`, body: t.subject, kind: `sla.${kind}`, urgent: kind === 'breached' });
 }
 
-module.exports = { DEFAULT_PREFS, prefsFor, ticketCreated, ticketAssigned, ticketUpdated, ticketCommented, mentionedUsers, slaEvent };
+// ---------- problems and changes ----------
+const RECORD = { problem: { path: 'problems', perm: 'problems' }, change: { path: 'changes', perm: 'changes' } };
+const canView = (u, kind) => (db.find('profiles', u.profileId)?.permissions?.[RECORD[kind].perm] || []).includes('view');
+
+function deliverRecord(userIds, rec, kind, { title, body, alertKind, urgent }) {
+  const ids = [...new Set(userIds.filter(Boolean))].filter((id) => { const u = db.find('users', id); return u?.active && canView(u, kind); });
+  if (!ids.length) return;
+  const url = `/#/${RECORD[kind].path}/${rec.id}`;
+  require('./inbox').add(ids, { title, body, kind: alertKind, url });
+  require('./push').sendToUsers(ids, { title, body, url, tag: rec.number, number: rec.number, urgent: !!urgent }, alertKind);
+}
+
+function recordAssigned(rec, actor, kind) {
+  const u = db.find('users', rec.assigneeId);
+  if (!u || u.id === actor?.id || !prefsFor(u).assigned) return;
+  deliverRecord([u.id], rec, kind, { title: `${rec.number} assigned to you`, body: rec.title, alertKind: `${kind}.assigned` });
+}
+
+function recordNotice(rec, kind, title, body, actor) {
+  const ids = [rec.assigneeId, rec.createdById || rec.requestedById].filter((id) => id && id !== actor?.id && prefsFor(db.find('users', id) || {}).updates);
+  deliverRecord(ids, rec, kind, { title, body, alertKind: `${kind}.updated` });
+}
+
+// CAB members are asked to approve (bell, push and email).
+function changeApprovalRequested(c, actor) {
+  const ids = (c.approverIds || []).filter((id) => id !== actor?.id && prefsFor(db.find('users', id) || {}).approvals);
+  deliverRecord(ids, c, 'change', {
+    title: `Approval needed: ${c.number}${c.type === 'emergency' ? ' (emergency)' : ''}`, body: `${c.title} · risk ${c.risk}`,
+    alertKind: 'change.approval', urgent: c.type === 'emergency',
+  });
+  const link = String(db.state.settings.publicUrl || '').replace(/\/+$/, '');
+  for (const u of (c.approverIds || []).map((id) => db.find('users', id)).filter((u) => u?.email && u.id !== actor?.id)) {
+    require('./email').sendMail({
+      to: u.email,
+      subject: `[${c.number}] Approval needed: ${c.title}`,
+      text: `Hello ${u.name},\n\n${actor?.name || 'Someone'} asks you to approve ${c.type} change ${c.number}.\n\nTitle: ${c.title}\nRisk: ${c.risk} · Impact: ${c.impact}\n`
+        + `Planned: ${c.plannedStart || '—'} → ${c.plannedEnd || '—'} (UTC)\n\nReason:\n${c.reason || '—'}\n\nBackout plan:\n${c.backoutPlan || '—'}\n`
+        + `${link ? `\nApprove or reject: ${link}/#/changes/${c.id}\n` : ''}\n— ${db.state.settings.companyName}`,
+    });
+  }
+}
+
+function changeDecision(c, actor, decision) {
+  const ids = [c.requestedById, c.assigneeId].filter((id) => id && id !== actor?.id && prefsFor(db.find('users', id) || {}).approvals);
+  deliverRecord(ids, c, 'change', { title: `${c.number} ${decision}`, body: c.title, alertKind: `change.${decision}` });
+}
+
+module.exports = {
+  DEFAULT_PREFS, prefsFor, ticketCreated, ticketAssigned, ticketUpdated, ticketCommented, mentionedUsers, slaEvent,
+  recordAssigned, recordNotice, changeApprovalRequested, changeDecision,
+};

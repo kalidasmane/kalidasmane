@@ -179,6 +179,7 @@
             <dl class="facts">${t.resolutionCode ? `<dt>Resolution</dt><dd>${esc(t.resolutionCode)}</dd>` : ''}<dt>Resolved</dt><dd>${App.fmtDateTime(t.resolvedAt)}</dd><dt>Time spent</dt><dd>${fmtMins(t.timeSpentMinutes)}</dd></dl>
             ${t.resolutionNotes ? `<div class="sla-meta"><b>Resolution notes</b><br>${esc(t.resolutionNotes).replace(/\n/g, '<br>')}</div>` : ''}
           </form>
+          ${itsmCard(t)}
           <section class="card">
             <header><h3>Time logged</h3>${App.can('timesheet', 'create') ? `<button class="btn sm" id="logtime">${icon('clock', 15)} Log time</button>` : ''}</header>
             ${t.timeEntries.length ? `<ul class="mini-list">${t.timeEntries.map((e) => `<li>${App.avatar(App.user(e.userId) || { id: e.userId, name: e.userName }, 24)}<span>${esc(e.userName)}<small class="muted">${App.fmtDate(e.date)} · ${esc(e.activity)}</small></span><b>${fmtMins(e.minutes)}</b></li>`).join('')}</ul>` : '<p class="muted pad">No time logged yet.</p>'}
@@ -207,6 +208,7 @@
       } catch (e) { App.fail(e); }
     });
     App.enhance(props);
+    bindItsm(el, t);
     el.querySelector('#remote')?.addEventListener('click', () => App.startRemote(t.deviceId, 'desktop', t.id));
     el.querySelector('#take')?.addEventListener('click', async () => {
       try { await App.put(`/api/tickets/${t.id}`, { assigneeId: App.me.id }); await App.refreshMeta(); App.render(); } catch (e) { App.fail(e); }
@@ -235,6 +237,61 @@
       ${row('First response', st.response)}
       ${row('Resolution', st.resolution, st.pausedMinutes ? `paused ${App.fmtDuration(st.pausedMinutes)}` : '')}
     </div></section>`;
+  }
+
+  // ITIL links: the problem behind this incident, matching known errors, related changes.
+  function itsmCard(t) {
+    const seeP = App.can('problems'); const seeC = App.can('changes');
+    if (!seeP && !seeC) return '';
+    const pr = t.problem;
+    return `<section class="card" id="itsm"><header><h3>Problem & change</h3></header><div class="pad">
+      ${seeP && pr ? `<div class="linked-rec">${icon('alert', 16)}<span><a href="#/problems/${pr.id}"><b>${esc(pr.number)}</b></a> ${esc(pr.title)}<small class="muted">${esc(pr.status)}${pr.knownError ? ' · known error' : ''}</small></span></div>
+        ${pr.workaround ? `<div class="workaround small"><span class="lbl">Workaround</span>${esc(pr.workaround).replace(/\n/g, '<br>')}<button type="button" class="btn sm ghost" data-usewa="${esc(pr.workaround)}">Use in reply</button></div>` : ''}` : ''}
+      ${seeP && !pr ? '<div id="kedb-hint"></div>' : ''}
+      ${seeC && t.changes?.length ? t.changes.map((c) => `<div class="linked-rec">${icon('change', 16)}<span><a href="#/changes/${c.id}"><b>${esc(c.number)}</b></a> ${esc(c.title)}<small class="muted">${esc(c.status)}</small></span></div>`).join('') : ''}
+      <div class="row wrap" style="margin-top:8px">
+        ${seeP && !pr && App.can('problems', 'create') ? `<button type="button" class="btn sm" id="mkprob">${icon('alert', 15)} Create problem</button>` : ''}
+        ${seeP && !pr && App.can('problems', 'edit') ? `<button type="button" class="btn sm ghost" id="linkprob">${icon('link', 15)} Link to problem</button>` : ''}
+        ${seeC && App.can('changes', 'create') ? `<button type="button" class="btn sm ghost" id="mkchg">${icon('change', 15)} Raise change</button>` : ''}
+      </div></div></section>`;
+  }
+
+  function bindItsm(el, t) {
+    const useWorkaround = (text) => {
+      const box = el.querySelector('#comment [name=text]');
+      box.value = `${box.value ? `${box.value}\n\n` : ''}${text}`;
+      el.querySelector('#comment [name=internal]').checked = false;
+      box.focus();
+      App.toast('Workaround added to the reply – review it and press Post', 'info');
+    };
+    el.querySelectorAll('[data-usewa]').forEach((b) => b.addEventListener('click', () => useWorkaround(b.dataset.usewa)));
+    el.querySelector('#mkprob')?.addEventListener('click', () => App.openNewProblem({
+      incidentIds: [t.id], title: t.subject, description: `Raised from incident ${t.number}.\n\n${t.description || ''}`.trim(),
+      category: t.category, impact: t.impact, urgency: t.urgency, projectId: t.projectId,
+    }));
+    el.querySelector('#mkchg')?.addEventListener('click', () => App.openNewChange({ incidentIds: [t.id], title: `Change for ${t.number}: ${t.subject}`.slice(0, 200), deviceIds: t.deviceId ? [t.deviceId] : [] }));
+    el.querySelector('#linkprob')?.addEventListener('click', async () => {
+      const open = await App.get('/api/problems?status=open');
+      App.modal({
+        title: `Link ${t.number} to a problem`,
+        body: open.length ? `<label>Problem<select name="problemId">${App.options(open.map((p) => ({ value: p.id, label: `${p.number} – ${p.title}` })))}</select></label>` : '<p class="muted">There are no open problems. Create one instead.</p>',
+        submitLabel: 'Link',
+        onSubmit: open.length ? async (f) => { await App.post(`/api/problems/${f.problemId}/link`, { ticketId: t.id }); App.toast('Linked'); App.render(); } : null,
+      });
+    });
+    const hint = el.querySelector('#kedb-hint');
+    if (hint) {
+      App.get(`/api/tickets/${t.id}/known-errors`).then((list) => {
+        if (!list.length || !document.body.contains(hint)) return;
+        hint.innerHTML = `<p class="small"><b>${icon('book', 14)} Matching known errors</b></p>${list.map((p) => `<div class="kedb-match"><a href="#/problems/${p.id}"><b>${esc(p.number)}</b> ${esc(p.title)}</a>
+          <div class="small muted">${esc(p.workaround).slice(0, 220)}</div>
+          <div class="row"><button type="button" class="btn sm ghost" data-usewa="${esc(p.workaround)}">Use workaround</button>${App.can('problems', 'edit') ? `<button type="button" class="btn sm ghost" data-linkp="${p.id}">Link to ${esc(p.number)}</button>` : ''}</div></div>`).join('')}`;
+        hint.querySelectorAll('[data-usewa]').forEach((b) => b.addEventListener('click', () => useWorkaround(b.dataset.usewa)));
+        hint.querySelectorAll('[data-linkp]').forEach((b) => b.addEventListener('click', async () => {
+          try { await App.post(`/api/problems/${b.dataset.linkp}/link`, { ticketId: t.id }); App.toast('Linked to the known error'); App.render(); } catch (e) { App.fail(e); }
+        }));
+      }).catch(() => {});
+    }
   }
 
   function resolveModal(t, status) {

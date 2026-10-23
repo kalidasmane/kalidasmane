@@ -271,6 +271,80 @@ async function main() {
     }
   }
 
+  // ---------- problems (ITIL problem management) ----------
+  const problems = require('../lib/problems');
+  const changes = require('../lib/changes');
+  const ticketBy = (text) => db.all('tickets').find((t) => t.subject.includes(text));
+  const ago = (h) => new Date(Date.now() - h * 3600000).toISOString();
+  const inH = (h, hour, min = 0) => { const d = new Date(Date.now() + h * 3600000); d.setUTCHours(hour, min, 0, 0); return d.toISOString(); };
+  const PROBLEMS = [
+    { title: 'SQL cluster runs out of disk space every few weeks', impact: 'High', urgency: 'Medium', owner: 'amit', status: 'Known Error', incidents: ['disk-full', 'SAP login'], project: null,
+      rootCause: 'Transaction-log backups stopped being cleaned up after the backup job moved to the new file share, so logs grow until the volume is full.',
+      workaround: 'Run the "Purge log backups older than 7 days" job on GLOBEX-SQL-02, then restart the SQL Agent service. Frees about 120 GB.',
+      resolution: 'Fix the clean-up step of the backup job and extend the log volume (change raised).' },
+    { title: 'Outlook keeps prompting for a password after MFA changes', impact: 'Medium', urgency: 'Medium', owner: 'neha', status: 'Known Error', incidents: ['Outlook keeps asking'], project: 'M365',
+      rootCause: 'Outlook keeps stale legacy credentials in Windows Credential Manager after the account is moved to modern authentication.',
+      workaround: 'Close Outlook, open Credential Manager → Windows Credentials, remove every entry starting with "MicrosoftOffice16", then start Outlook and sign in again.', resolution: '' },
+    { title: 'Web servers fail to start after monthly patching', impact: 'High', urgency: 'High', owner: 'pooja', status: 'Root Cause Identified', incidents: ['Production web server down'], project: 'SEC',
+      rootCause: 'The cumulative update resets the application pool identity, so the site cannot read its certificate key.', workaround: '', resolution: '' },
+    { title: 'VPN drops for remote staff after client update', impact: 'Medium', urgency: 'High', owner: 'vikram', status: 'Under Investigation', incidents: ['VPN not connecting'], project: null, rootCause: '', workaround: '', resolution: '' },
+    { title: 'Azure VMs lose network connectivity after resize', impact: 'Medium', urgency: 'Medium', owner: null, status: 'New', incidents: ['Azure VM'], project: 'CLD', rootCause: '', workaround: '', resolution: '' },
+    { title: 'Print spooler crashes on the 2nd-floor printer', impact: 'Low', urgency: 'Medium', owner: 'arjun', status: 'Resolved', incidents: [], project: 'ITAM',
+      rootCause: 'A universal print driver version had a memory leak in the spooler.', workaround: 'Restart the Print Spooler service.', resolution: 'Driver replaced with the vendor model-specific driver 5.6.1 on the print server.' },
+  ];
+  const probBy = {};
+  for (const [i, x] of PROBLEMS.entries()) {
+    const p = problems.create({
+      title: x.title, description: `${x.title}. Raised from repeated incidents.`, impact: x.impact, urgency: x.urgency, category: 'Problem',
+      assigneeId: uid(x.owner), projectId: x.project ? byCode[x.project].id : null,
+      incidentIds: x.incidents.map((s) => ticketBy(s)?.id).filter(Boolean),
+    }, admin);
+    p.createdAt = ago(240 - i * 30);
+    problems.update(p, { rootCause: x.rootCause, workaround: x.workaround, resolution: x.resolution, status: x.status }, uid(x.owner) ? byUser[x.owner] : admin);
+    probBy[i] = p;
+  }
+
+  // ---------- changes (ITIL change management) ----------
+  const dev = (...names) => names.map((n) => byDevice[n].id);
+  const approve = (c, names, decision = 'approved', comment = '') => {
+    c.approverIds = names.map(uid);
+    c.approvals = names.filter(Boolean).map((n) => ({ userId: uid(n), name: byUser[n].name, decision, comment, at: ago(20) }));
+  };
+  const CHANGES = [
+    { title: 'Fix SQL backup clean-up and extend the log volume', type: 'normal', risk: 'High', impact: 'Medium', owner: 'amit', problem: 0, devices: ['GLOBEX-SQL-02'],
+      start: inH(48, 18), end: inH(48, 20), status: 'Scheduled', cab: ['karan', 'priya'] },
+    { title: 'Core switch firmware upgrade to IOS-XE 17.12', type: 'normal', risk: 'High', impact: 'High', owner: 'vikram', devices: ['INITECH-CORE-SW1'],
+      start: inH(48, 19), end: inH(48, 21), status: 'Approved', cab: ['karan', 'priya'] },
+    { title: 'Firewall rule for the new payment API', type: 'normal', risk: 'Medium', impact: 'Medium', owner: 'vikram', incident: 'Firewall rule change', devices: ['INITECH-FW-01'],
+      start: inH(72, 17), end: inH(72, 18), status: 'Awaiting Approval', cab: ['admin', 'karan'], pending: true },
+    { title: 'Monthly Windows patching – Globex SAP application server', type: 'standard', risk: 'Low', impact: 'Low', owner: 'amit', devices: ['GLOBEX-SAP-APP01'],
+      start: inH(96, 20), end: inH(96, 22), status: 'Scheduled' },
+    { title: 'Emergency: block the phishing sender domain at the mail gateway', type: 'emergency', risk: 'Low', impact: 'Medium', owner: 'rohan', incident: 'Phishing email',
+      start: ago(5), end: ago(4.5), status: 'Closed', cab: ['priya'], outcome: 'Successful', review: 'Domain blocked within 20 minutes; no further phishing mails delivered. Added the domain to the threat-intel feed.' },
+    { title: 'Rotate the SAP service account password', type: 'standard', risk: 'Low', impact: 'Medium', owner: 'amit', devices: ['GLOBEX-SAP-APP01'],
+      start: ago(26), end: ago(25), status: 'Review', outcome: 'Successful with issues' },
+    { title: 'Move the Marketing file share to SharePoint Online', type: 'normal', risk: 'High', impact: 'High', owner: 'neha', project: 'M365',
+      start: inH(120, 9), end: inH(120, 18), status: 'Rejected', cab: ['priya'], decision: 'rejected', comment: 'Needs a pilot with a small team and a tested rollback first.' },
+    { title: 'Upgrade the staging Kubernetes cluster to 1.31', type: 'normal', risk: 'Medium', impact: 'Low', owner: 'sameer', devices: ['INITECH-K8S-NODE3'], status: 'Draft' },
+  ];
+  for (const [i, x] of CHANGES.entries()) {
+    const c = changes.create({
+      title: x.title, type: x.type, risk: x.risk, impact: x.impact, assigneeId: uid(x.owner), deviceIds: dev(...(x.devices || [])),
+      problemId: x.problem !== undefined ? probBy[x.problem].id : null, incidentIds: x.incident ? [ticketBy(x.incident)?.id].filter(Boolean) : [],
+      reason: x.reason || `${x.problem !== undefined ? 'Permanent fix for a known error' : x.type === 'emergency' ? 'Stop an active security incident' : 'Planned improvement requested by the service owner'}: ${x.title}.`, description: x.title,
+      implementationPlan: '1. Announce the maintenance window\n2. Take a backup / snapshot\n3. Apply the change\n4. Run the test plan',
+      backoutPlan: 'Restore the snapshot / previous configuration taken in step 2 (about 15 minutes).',
+      testPlan: 'Service health checks pass; monitoring is green for 30 minutes; a user confirms access.',
+      plannedStart: x.start || null, plannedEnd: x.end || null,
+    }, byUser[x.owner]);
+    c.createdAt = ago(200 - i * 20);
+    c.status = x.status;
+    if (x.cab) approve(c, x.pending ? [] : x.cab, x.decision, x.comment);
+    if (x.cab && x.pending) c.approverIds = x.cab.map(uid);
+    if (['Closed', 'Review'].includes(x.status)) { c.actualStart = x.start; c.actualEnd = x.end; c.outcome = x.outcome; c.reviewNotes = x.review || ''; }
+    changes.history(c, `Status: Draft → ${x.status}${x.comment ? ` · ${x.comment}` : ''}`, byUser[x.owner]);
+  }
+
   // ---------- workflows ----------
   const l1l2 = ['pooja', 'neha', 'arjun'].map(uid);
   db.insert('workflows', {
@@ -308,7 +382,7 @@ async function main() {
 
   await db.close();
   console.log(`Demo data loaded: ${PEOPLE.length} team members, ${db.all('profiles').length} roles, ${PROJECTS.length} projects, `
-    + `${TICKET_TYPES.length} ticket types, ${TICKETS.length} tickets, ${DEVICES.length} devices, ${db.all('timesheets').length} tracker entries.`);
+    + `${TICKET_TYPES.length} ticket types, ${TICKETS.length} tickets, ${db.all('problems').length} problems, ${db.all('changes').length} changes, ${DEVICES.length} devices, ${db.all('timesheets').length} tracker entries.`);
   console.log(`Demo users (password ${DEMO_PASSWORD}): ${PEOPLE.map((p) => p[0]).join(', ')}`);
 }
 

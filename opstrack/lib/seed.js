@@ -22,6 +22,7 @@ const DEFAULT_PROFILES = [
       tickets: ['view', 'create', 'edit', 'viewAll', 'assign'], projects: ['view', 'create', 'edit'],
       reports: ['view'], users: ['view'], forms: ['view'], workflows: ['view'],
       devices: ['view', 'create', 'edit', 'connect'],
+      problems: ['view', 'create', 'edit'], changes: ['view', 'create', 'edit', 'approve'],
     },
   },
   {
@@ -30,6 +31,7 @@ const DEFAULT_PROFILES = [
     permissions: {
       dashboard: ['view'], timesheet: ['view', 'create', 'edit', 'delete'],
       tickets: ['view', 'create', 'edit'], projects: ['view'], devices: ['view', 'connect'],
+      problems: ['view', 'create', 'edit'], changes: ['view', 'create', 'edit'],
     },
   },
   {
@@ -38,6 +40,7 @@ const DEFAULT_PROFILES = [
     permissions: {
       dashboard: ['view'], timesheet: ['view', 'create', 'edit', 'delete'],
       tickets: ['view', 'create', 'edit', 'viewAll', 'assign'], projects: ['view'], devices: ['view', 'connect'],
+      problems: ['view', 'create', 'edit'], changes: ['view', 'create', 'edit'],
     },
   },
 ];
@@ -45,6 +48,8 @@ const DEFAULT_PROFILES = [
 const DEFAULT_SETTINGS = {
   companyName: 'OpsTrack',
   ticketPrefix: 'INC',
+  problemPrefix: 'PRB',
+  changePrefix: 'CHG',
   workloadGreenMax: 3, // 1..greenMax open tickets = available (green); above = busy (red)
   dailyTargetHours: 8,
   activityCategories: ['Project Work', 'Customer Support', 'Meeting', 'Training', 'Internal', 'Leave'],
@@ -76,6 +81,18 @@ function seed() {
   }
   // The Administrator profile always has every permission, including modules added later.
   for (const p of db.all('profiles')) if (p.system) p.permissions = allPerms();
+  // Problem and Change Management were added later: give existing roles sensible access once,
+  // based on what they can do with tickets. Admins can change it under Profiles.
+  for (const p of db.all('profiles')) {
+    if (p.system || p.itsmPerms) continue;
+    const t = p.permissions?.tickets || [];
+    const writes = t.includes('edit');
+    const base = writes ? ['view', 'create', 'edit'] : t.includes('view') ? ['view'] : [];
+    if (!p.permissions.problems) p.permissions.problems = base;
+    // Approving changes (CAB) goes to roles that can assign tickets, e.g. managers and team leads.
+    if (!p.permissions.changes) p.permissions.changes = writes && t.includes('assign') ? [...base, 'approve'] : base;
+    p.itsmPerms = true;
+  }
   if (!db.all('users').length) {
     const admin = db.all('profiles').find((p) => p.key === 'admin');
     db.insert('users', {
