@@ -3,7 +3,7 @@
 // as a push notification to any devices the user has turned push on for.
 const db = require('./db');
 
-const DEFAULT_PREFS = { assigned: true, updates: true, comments: true, mentions: true, newTickets: 'none' }; // newTickets: none | critical | high | all
+const DEFAULT_PREFS = { assigned: true, updates: true, comments: true, mentions: true, sla: true, newTickets: 'none' }; // newTickets: none | critical | high | all
 const PRIORITY_RANK = { critical: ['Critical'], high: ['High', 'Critical'] };
 
 function prefsFor(user) {
@@ -33,14 +33,14 @@ function ticketCreated(t, actor) {
       const p = prefsFor(u).newTickets;
       return p === 'all' || (PRIORITY_RANK[p] || []).includes(t.priority);
     }).map((u) => u.id);
-  deliver(ids, t, { title: `New ${t.priority} ticket ${t.number}`, body: t.subject, kind: 'ticket.created', urgent: t.priority === 'Critical' });
+  deliver(ids, t, { title: `New ${require('./sla').label(t.priority)} ticket ${t.number}`, body: t.subject, kind: 'ticket.created', urgent: t.priority === 'Critical' });
   if (t.assigneeId) ticketAssigned(t, actor);
 }
 
 function ticketAssigned(t, actor) {
   const u = db.find('users', t.assigneeId);
   if (!u || !u.active || u.id === actor?.id || !prefsFor(u).assigned) return;
-  deliver([u.id], t, { title: `${t.number} assigned to you`, body: `${t.subject} · ${t.priority}`, kind: 'ticket.assigned', urgent: t.priority === 'Critical' });
+  deliver([u.id], t, { title: `${t.number} assigned to you`, body: `${t.subject} · ${require('./sla').label(t.priority)}`, kind: 'ticket.assigned', urgent: t.priority === 'Critical' });
 }
 
 function ticketUpdated(t, before, changes, actor) {
@@ -65,4 +65,19 @@ function ticketCommented(t, comment, actor) {
   deliver([a.id], t, { title: `${who} ${comment.internal ? 'added a note on' : 'replied on'} ${t.number}`, body: snippet, kind: 'comment' });
 }
 
-module.exports = { DEFAULT_PREFS, prefsFor, ticketCreated, ticketAssigned, ticketUpdated, ticketCommented, mentionedUsers };
+// SLA warnings go to the assignee. Breaches are escalated (ITIL hierarchical escalation):
+// the assignee and their reporting manager, or the people who assign tickets if nobody owns it.
+function slaEvent(t, kind, target, text) {
+  const a = db.find('users', t.assigneeId);
+  const ids = [];
+  if (a?.active) ids.push(a.id);
+  if (kind === 'breached') {
+    const sla = require('./sla').cfg();
+    if (a && sla.escalateToManager && a.managerId) ids.push(a.managerId);
+    if (!a) ids.push(...db.where('users', (u) => u.active && ticketPerms(u).includes('assign')).map((u) => u.id));
+  }
+  const users = ids.map((id) => db.find('users', id)).filter((u) => u?.active && canSee(u, t) && prefsFor(u).sla);
+  deliver(users.map((u) => u.id), t, { title: `${t.number}: ${text}`, body: t.subject, kind: `sla.${kind}`, urgent: kind === 'breached' });
+}
+
+module.exports = { DEFAULT_PREFS, prefsFor, ticketCreated, ticketAssigned, ticketUpdated, ticketCommented, mentionedUsers, slaEvent };

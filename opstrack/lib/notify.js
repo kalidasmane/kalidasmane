@@ -6,6 +6,8 @@ const db = require('./db');
 const EVENTS = {
   'ticket.created': 'New ticket',
   'ticket.assigned': 'Ticket assigned',
+  'sla.warning': 'SLA at risk',
+  'sla.breached': 'SLA breached',
 };
 
 const TYPES = {
@@ -23,7 +25,7 @@ const SECRET_FIELDS = ['webhookUrl', 'accessToken', 'authToken', 'apiSecret', 'g
 
 // Fields a WhatsApp template's body placeholders {{1}}, {{2}}, … are filled with, in order.
 const TEMPLATE_FIELDS = {
-  event: 'Event (New ticket / Ticket assigned)', number: 'Ticket number', subject: 'Subject',
+  event: 'Event (New ticket / Ticket assigned / SLA)', number: 'Ticket number', subject: 'Subject',
   priority: 'Priority', category: 'Category', requester: 'Requester', assignee: 'Assignee',
   status: 'Status', link: 'Link to the ticket',
 };
@@ -40,7 +42,8 @@ function ticketLink(t) {
 function ticketFacts(t, event) {
   const assignee = db.find('users', t.assigneeId);
   return {
-    event: EVENTS[event] || 'Ticket update', number: t.number, subject: t.subject, priority: t.priority,
+    event: EVENTS[event] || 'Ticket update', number: t.number, subject: t.subject,
+    priority: require('./sla').label(t.priority), priorityName: t.priority,
     category: t.category, status: t.status, requester: t.requesterName || t.requesterEmail || '—',
     assignee: assignee?.name || 'Unassigned', link: ticketLink(t),
   };
@@ -58,7 +61,7 @@ function plainText(f, extra) {
 
 // Adaptive Card accepted by both classic Teams incoming webhooks and Teams "Workflows" webhooks.
 function teamsCard(f, extra) {
-  const color = { Critical: 'Attention', High: 'Warning' }[f.priority] || 'Accent';
+  const color = { Critical: 'Attention', High: 'Warning' }[f.priorityName || f.priority] || 'Accent';
   const card = {
     type: 'AdaptiveCard', $schema: 'http://adaptivecards.io/schemas/adaptive-card.json', version: '1.4',
     body: [
@@ -99,7 +102,7 @@ function slackEscape(s) {
 }
 
 function slackMessage(ch, f, extra) {
-  const critical = f.priority === 'Critical';
+  const critical = (f.priorityName || f.priority) === 'Critical';
   const mention = ch.mentionCritical && critical ? '<!here> ' : '';
   const field = (title, value) => ({ type: 'mrkdwn', text: `*${title}*\n${slackEscape(value || '—')}` });
   const blocks = [

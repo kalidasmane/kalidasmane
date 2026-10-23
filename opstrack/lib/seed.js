@@ -52,7 +52,7 @@ const DEFAULT_SETTINGS = {
   ticketPriorities: ['Low', 'Medium', 'High', 'Critical'],
   ticketStatuses: ['New', 'Open', 'In Progress', 'On Hold', 'Resolved', 'Closed'],
   closedStatuses: ['Resolved', 'Closed'],
-  slaHours: { Low: 72, Medium: 24, High: 8, Critical: 4 },
+  sla: JSON.parse(JSON.stringify(require('./sla').DEFAULTS)), // ITIL priority matrix + SLA targets (Settings → SLA & Priority)
   notifyOnAssign: true,
   notifyRequesterOnCreate: true,
   emailNotify: { ...require('./ticketmail').DEFAULTS },
@@ -94,11 +94,13 @@ function seed() {
         { key: 'name', label: 'Your name', type: 'text', required: true },
         { key: 'email', label: 'Your email', type: 'email', required: true },
         { key: 'subject', label: 'Subject', type: 'text', required: true },
-        { key: 'impact', label: 'Impact', type: 'select', required: true, options: ['Single user', 'Team', 'Whole company'] },
+        { key: 'impact', label: 'Who is affected? (impact)', type: 'select', required: true, options: ['Just me', 'My team or department', 'Whole company / many users'] },
+        { key: 'urgency', label: 'How urgent is it? (urgency)', type: 'select', required: true, options: ['Can wait', 'Work is degraded – I have a workaround', 'Work has stopped'] },
         { key: 'description', label: 'Describe the problem', type: 'textarea', required: true },
       ],
     });
   }
+  require('./sla').migrate();
   db.flush();
 }
 

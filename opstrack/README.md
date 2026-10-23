@@ -15,8 +15,10 @@ A self-hosted web application for engineering and support teams that combines:
   project* matrix, engineer effort vs. daily target, tickets by status /
   priority, team workload, latest updates and *not logged today*. Filter by
   date range, engineer and project; show/hide widgets per user.
-- **Tickets (ITSM)** – service-desk queue with priorities, SLA due dates,
-  conversation, internal notes, history and time logging against tickets.
+- **Tickets (ITSM)** – service-desk queue following the ITIL incident process: P1–P4 priority
+  from impact × urgency, response and resolution SLAs (24×7 or business hours), on-hold pausing,
+  escalation, resolution codes, auto-close and reopen; plus conversation, internal notes,
+  history and time logging against tickets. See [SLA and priority (ITIL)](#sla-and-priority-itil).
 - **Devices & Remote** – inventory of PCs, servers and network devices, with one-click
   **remote desktop, terminal and file sessions** through MeshCentral or Apache Guacamole.
   Sessions open inside OpsTrack with a timer and notes. When an engineer ends a session,
@@ -58,7 +60,9 @@ A self-hosted web application for engineering and support teams that combines:
     round-robin, **least-loaded by workload**, set priority/status/category/
     project, add note, send email, create ticket). Includes an execution log.
   - **General** – workspace name, ticket prefix, workload thresholds, daily
-    target hours, categories, statuses and SLA hours.
+    target hours, categories and statuses.
+  - **SLA & Priority (ITIL)** – priority matrix, response / resolution targets, business hours,
+    holidays, pending statuses, escalation and auto-close.
   - **Audit log**.
 
 ### Workload lights and online status
@@ -191,6 +195,60 @@ Put it behind HTTPS (nginx, Caddy, IIS, or your cloud's load balancer).
 | `TRUST_PROXY` | `1` | Number of reverse proxies in front of the app; set to `0` when exposed directly |
 | `HTTPS_PROXY` | – | Outbound proxy for push notifications (e.g. `http://proxy.corp:8080`) |
 
+## SLA and priority (ITIL)
+
+Tickets follow the ITIL incident process. Everything below can be changed under
+**Settings → SLA & Priority (ITIL)**.
+
+**Priority = impact × urgency.** When a ticket is raised you pick the impact (who is affected) and
+the urgency (how soon it hurts); the matrix gives the priority. You can still set a priority by
+hand. Email and API callers can send `P1`…`P4` or the priority name.
+
+| Impact ↓ / Urgency → | High (work stopped) | Medium (degraded) | Low (can wait) |
+|----------------------|---------------------|-------------------|----------------|
+| **High** – organisation, a site or many users | P1 Critical | P2 High | P3 Medium |
+| **Medium** – a department or several users | P2 High | P3 Medium | P4 Low |
+| **Low** – one user | P3 Medium | P4 Low | P4 Low |
+
+**Standard service levels**
+
+| Priority | First response | Resolution | Clock |
+|----------|----------------|------------|-------|
+| P1 – Critical | 15 minutes | 4 hours | 24×7 |
+| P2 – High | 30 minutes | 8 hours | 24×7 |
+| P3 – Medium | 2 hours | 16 working hours (2 working days) | Business hours |
+| P4 – Low | 8 hours | 40 working hours (5 working days) | Business hours |
+
+- **Business hours:** Monday–Friday, 09:00–18:00 in the server's time zone by default. Set your
+  own time zone, hours, working days and holidays. Business-hours targets only count working time.
+- **Response:** met by the first reply to the requester (a comment that is not an internal note),
+  or by moving the ticket on from *New* / *Open*.
+- **Resolution:** met when the ticket reaches *Resolved* or *Closed*.
+- **On Hold (pending):** stops the resolution clock until the ticket moves on. A reason is
+  recorded: awaiting requester, third party / vendor, a change, or scheduled for later.
+- **Warning and breach:**
+  - At 75% of a target the assignee is warned. A breach is escalated to the assignee and their
+    reporting manager; if nobody owns the ticket, it goes to everyone who can assign tickets.
+  - Both appear in the ticket history and the bell, and can be sent to Teams / Slack / WhatsApp /
+    SMS channels (events *SLA at risk* and *SLA breached*).
+  - Both can start workflows (triggers *SLA is at risk* / *SLA is breached*) to reassign, raise the
+    priority or email someone. The demo data includes an example workflow for breached P1 / P2
+    tickets.
+- **Resolution and closure:**
+  - Resolving or closing needs a resolution code (Fixed, Workaround provided, Known error,
+    Duplicate, Not reproducible, User guidance given, Cancelled by requester) and resolution
+    notes. The notes are included in the status email to the requester.
+  - Resolved tickets close automatically after 3 days.
+  - A reply from the requester reopens the ticket; reopens are counted.
+- **Where you see it:**
+  - Each ticket shows both clocks with a progress bar.
+  - The ticket list has an SLA column and an SLA filter (breached / at risk / paused / on track).
+  - The dashboard has *SLA compliance* and an *SLA performance by priority* table.
+  - The CSV export includes both SLAs.
+
+Changing targets recalculates open tickets straight away. Older databases are upgraded
+automatically; a custom "hours to resolve" setting carries over as the resolution target.
+
 ## In-app notifications
 
 The bell in the top bar shows each person's notifications with an unread count. Notifications arrive
@@ -201,6 +259,7 @@ Read state is kept in step across all of a person's open tabs.
 People get a notification when:
 - a ticket is assigned to them;
 - someone else changes or comments on their ticket (including requester email replies);
+- an SLA on their ticket is at risk or breached (breaches also go to their manager);
 - someone **@mentions** them in a comment. Type `@username`, for example `@amit`. The mention only
   notifies people who are allowed to see that ticket;
 - a new ticket arrives, if they can see all tickets and chose that.
@@ -407,6 +466,7 @@ lib/auth.js          password hashing (scrypt), sessions, presence, permissions
 lib/seed.js          default profiles, admin user, settings, sample form
 lib/tickets.js       ticket service, workload calculation, notifications
 lib/workflow.js      workflow engine + scheduler
+lib/sla.js           ITIL priority matrix, SLA clocks (business hours, pausing), warnings, escalation, auto-close
 lib/alerts.js        who is notified about which ticket event (personal preferences, @mentions)
 lib/inbox.js         in-app notifications (the bell) with live updates over Server-Sent Events
 lib/push.js          browser push notifications (Web Push / VAPID)

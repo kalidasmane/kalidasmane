@@ -12,6 +12,7 @@ const notify = require('./lib/notify');
 const push = require('./lib/push');
 const alerts = require('./lib/alerts');
 const inbox = require('./lib/inbox');
+const sla = require('./lib/sla');
 
 const app = express();
 app.disable('x-powered-by');
@@ -102,6 +103,7 @@ app.get('/api/meta', requireAuth, (req, res) => {
     projects: db.all('projects').map((p) => pick(p, ['id', 'code', 'name', 'status', 'client'])),
     profiles: db.all('profiles').map((p) => pick(p, ['id', 'name', 'color'])),
     forms: db.all('forms').map((f) => pick(f, ['id', 'name', 'active', 'public'])),
+    itil: { levels: sla.LEVELS, impact: sla.IMPACT, urgency: sla.URGENCY, resolutionCodes: sla.RESOLUTION_CODES, holdReasons: sla.HOLD_REASONS, defaults: sla.DEFAULTS, matrix: sla.cfg().matrix, pauseStatuses: sla.cfg().pauseStatuses, requireResolution: sla.cfg().requireResolution },
     workflowMeta: { triggers: workflow.TRIGGERS, operators: workflow.OPERATORS, actions: workflow.ACTIONS },
     emailProviders: email.PROVIDERS,
     remoteProviders: remote.PROVIDERS,
@@ -364,14 +366,28 @@ function visibleTicket(user, t) {
     || auth.reportees(user.id).has(t.assigneeId);
 }
 
+// SLA filter for the ticket list: breached | at_risk | paused | ok
+function slaMatches(t, want) {
+  if (tickets.isClosed(t)) return false;
+  const st = sla.status(t);
+  const states = [st.response.doneAt ? null : st.response.state, st.resolution.state];
+  if (want === 'breached') return states.includes('breached');
+  if (want === 'at_risk') return !states.includes('breached') && states.includes('at_risk');
+  if (want === 'paused') return st.paused;
+  return !states.includes('breached') && !states.includes('at_risk');
+}
+
 function ticketOut(t, full = false) {
   const minutes = db.where('timesheets', (e) => e.ticketId === t.id).reduce((s, e) => s + e.minutes, 0);
+  const st = sla.status(t);
   const out = {
     ...t, assigneeName: db.find('users', t.assigneeId)?.name || null,
     projectName: db.find('projects', t.projectId)?.name || null,
     formName: db.find('forms', t.formId)?.name || null, timeSpentMinutes: minutes,
     deviceName: db.find('devices', t.deviceId)?.name || null,
-    overdue: !tickets.isClosed(t) && t.dueAt && new Date(t.dueAt) < new Date(),
+    priorityCode: sla.code(t.priority), sla: st,
+    overdue: st.resolution.state === 'breached' && !tickets.isClosed(t),
+    slaBreached: st.response.state === 'breached' || st.resolution.state === 'breached',
     commentCount: (t.comments || []).filter((c) => !c.system).length,
   };
   if (!full) delete out.comments;
@@ -385,6 +401,7 @@ app.get('/api/tickets', requireAuth, requirePerm('tickets', 'view'), (req, res) 
     && (!q.status || (q.status === 'open' ? !tickets.isClosed(t) : t.status === q.status))
     && (!q.assigneeId || (q.assigneeId === 'none' ? !t.assigneeId : t.assigneeId === q.assigneeId))
     && (!q.priority || t.priority === q.priority)
+    && (!q.sla || slaMatches(t, q.sla))
     && (!text || `${t.number} ${t.subject} ${t.requesterEmail} ${t.requesterName}`.toLowerCase().includes(text)))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   res.json(list.map((t) => ticketOut(t)));
@@ -401,7 +418,7 @@ app.post('/api/tickets', requireAuth, requirePerm('tickets', 'create'), (req, re
   const b = req.body || {};
   if (!b.subject) return bad(res, 'Subject is required');
   if (b.assigneeId && !can(req.user, 'tickets', 'assign')) b.assigneeId = null;
-  const t = tickets.create(pick(b, ['subject', 'description', 'category', 'priority', 'assigneeId', 'projectId', 'deviceId', 'watchers', 'requesterName', 'requesterEmail']), req.user, { source: 'web' });
+  const t = tickets.create(pick(b, ['subject', 'description', 'category', 'priority', 'impact', 'urgency', 'assigneeId', 'projectId', 'deviceId', 'watchers', 'requesterName', 'requesterEmail']), req.user, { source: 'web' });
   res.json(ticketOut(t));
 });
 
@@ -413,6 +430,15 @@ app.put('/api/tickets/:id', requireAuth, requirePerm('tickets', 'edit'), (req, r
     // Engineers may only pick up an unassigned ticket themselves.
     if (!(b.assigneeId === req.user.id && !t.assigneeId)) return bad(res, 'You do not have permission to assign tickets', 403);
   }
+  // ITIL resolution: a resolution code and notes are recorded before a ticket is resolved or closed.
+  const closing = b.status && settings().closedStatuses.includes(b.status) && !tickets.isClosed(t);
+  if (closing && sla.cfg().requireResolution) {
+    const codeV = b.resolutionCode ?? t.resolutionCode;
+    const notesV = String(b.resolutionNotes ?? t.resolutionNotes ?? '').trim();
+    if (!sla.RESOLUTION_CODES.includes(codeV) || !notesV) return bad(res, 'Choose a resolution code and add resolution notes before resolving or closing the ticket');
+  }
+  if ('resolutionCode' in b && b.resolutionCode && !sla.RESOLUTION_CODES.includes(b.resolutionCode)) return bad(res, 'Unknown resolution code');
+  if ('holdReason' in b && b.holdReason && !sla.HOLD_REASONS.includes(b.holdReason)) return bad(res, 'Unknown on-hold reason');
   tickets.update(t, b, req.user);
   res.json(ticketOut(t, true));
 });
@@ -692,7 +718,7 @@ app.post('/api/push/unsubscribe', requireAuth, (req, res) => {
 app.put('/api/push/prefs', requireAuth, (req, res) => {
   const b = req.body || {};
   const p = alerts.prefsFor(req.user);
-  for (const k of ['assigned', 'updates', 'comments', 'mentions']) if (k in b) p[k] = b[k] === true;
+  for (const k of ['assigned', 'updates', 'comments', 'mentions', 'sla']) if (k in b) p[k] = b[k] === true;
   if (['none', 'critical', 'high', 'all'].includes(b.newTickets)) p.newTickets = b.newTickets;
   db.update('users', req.user.id, { pushPrefs: p });
   res.json(p);
@@ -800,11 +826,52 @@ app.post('/api/workflows/:id/run', requireAuth, requirePerm('workflows', 'edit')
 });
 
 // ---------- settings ----------
+function slaSettings(b, priorities, statuses) {
+  const cur = sla.cfg();
+  const out = { ...cur };
+  if (b.matrix) {
+    out.matrix = {};
+    for (const i of sla.LEVELS) {
+      out.matrix[i] = {};
+      for (const u of sla.LEVELS) {
+        const p = b.matrix?.[i]?.[u];
+        if (!priorities.includes(p)) return { error: `Choose a priority for impact ${i} / urgency ${u}` };
+        out.matrix[i][u] = p;
+      }
+    }
+  }
+  if (b.policies) {
+    out.policies = {};
+    for (const p of priorities) {
+      const x = b.policies[p] || cur.policies[p] || {};
+      const response = Math.round(Number(x.response)); const resolution = Math.round(Number(x.resolution));
+      if (!(response > 0) || !(resolution > 0)) return { error: `Enter response and resolution targets for ${p}` };
+      if (response > resolution) return { error: `${sla.label(p)}: the response target can't be longer than the resolution target` };
+      out.policies[p] = { response, resolution, hours: x.hours === 'business' ? 'business' : '24x7' };
+    }
+  }
+  if (b.businessHours) {
+    const h = b.businessHours;
+    const time = /^([01]\d|2[0-3]):[0-5]\d$/;
+    if (!time.test(h.start) || !time.test(h.end) || h.end <= h.start) return { error: 'Business hours need a start and end time (HH:MM), with the end after the start' };
+    try { new Intl.DateTimeFormat('en-US', { timeZone: h.timezone }); } catch { return { error: 'Unknown time zone' }; }
+    const days = [...new Set((h.days || []).map(Number).filter((d) => d >= 0 && d <= 6))].sort();
+    if (!days.length) return { error: 'Choose at least one working day' };
+    out.businessHours = { timezone: h.timezone, start: h.start, end: h.end, days };
+  }
+  if ('holidays' in b) out.holidays = [...new Set((Array.isArray(b.holidays) ? b.holidays : String(b.holidays).split(/[\s,;]+/)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))].sort();
+  if ('pauseStatuses' in b) out.pauseStatuses = (b.pauseStatuses || []).filter((x) => statuses.includes(x) && !settings().closedStatuses.includes(x));
+  if ('warnAt' in b) out.warnAt = Math.min(99, Math.max(10, Math.round(Number(b.warnAt)) || 75));
+  if ('autoCloseDays' in b) out.autoCloseDays = Math.min(90, Math.max(0, Math.round(Number(b.autoCloseDays)) || 0));
+  for (const k of ['escalateToManager', 'requireResolution']) if (k in b) out[k] = b[k] === true;
+  return { sla: out };
+}
+
 app.get('/api/settings', requireAuth, requirePerm('settings', 'view'), (req, res) => res.json(settings()));
 app.put('/api/settings', requireAuth, requirePerm('settings', 'edit'), (req, res) => {
   const b = req.body || {};
   const listKeys = ['activityCategories', 'ticketCategories', 'ticketPriorities', 'ticketStatuses', 'closedStatuses'];
-  const patch = pick(b, ['companyName', 'publicUrl', 'ticketPrefix', 'workloadGreenMax', 'dailyTargetHours', 'slaHours', 'notifyOnAssign', 'notifyRequesterOnCreate', ...listKeys]);
+  const patch = pick(b, ['companyName', 'publicUrl', 'ticketPrefix', 'workloadGreenMax', 'dailyTargetHours', 'notifyOnAssign', 'notifyRequesterOnCreate', ...listKeys]);
   if (b.emailNotify && typeof b.emailNotify === 'object') {
     const e = pick(b.emailNotify, ['requesterOnStatus', 'requesterStatuses', 'requesterOnReply', 'assigneeOnUpdate', 'assigneeOnComment', 'watchersOnUpdate']);
     for (const k of Object.keys(e)) if (k !== 'requesterStatuses') e[k] = e[k] === true;
@@ -819,9 +886,16 @@ app.put('/api/settings', requireAuth, requirePerm('settings', 'edit'), (req, res
     patch.remote = { ...settings().remote, ...r, embed: r.embed !== false, logToTracker: r.logToTracker !== false };
   }
   for (const k of listKeys) if (k in patch) patch[k] = (Array.isArray(patch[k]) ? patch[k] : String(patch[k]).split(',')).map((x) => String(x).trim()).filter(Boolean);
+  if (b.sla && typeof b.sla === 'object') {
+    const r = slaSettings(b.sla, patch.ticketPriorities || settings().ticketPriorities, patch.ticketStatuses || settings().ticketStatuses);
+    if (r.error) return bad(res, r.error);
+    patch.sla = r.sla;
+  }
   if (patch.publicUrl && !/^https?:\/\/\S+$/i.test(patch.publicUrl)) return bad(res, 'OpsTrack address must start with http:// or https://');
   if (patch.ticketPrefix) patch.ticketPrefix = patch.ticketPrefix.toUpperCase().replace(/[^A-Z0-9]/g, '') || 'INC';
   Object.assign(db.state.settings, patch);
+  // New targets apply to open tickets straight away.
+  if (patch.sla || patch.ticketPriorities) for (const t of db.all('tickets')) if (!tickets.isClosed(t)) { sla.apply(t); sla.markCurrent(t); }
   db.save();
   res.json(settings());
 });
@@ -872,6 +946,24 @@ app.get('/api/dashboard', requireAuth, requirePerm('dashboard', 'view'), (req, r
   const countBy = (arr, k) => arr.reduce((m, t) => { m[t[k]] = (m[t[k]] || 0) + 1; return m; }, {});
   const open = tv.filter((t) => !tickets.isClosed(t));
   const resolved = tv.filter((t) => inRange(t.resolvedAt));
+  // SLA performance per priority: responses and resolutions due in the range, plus open tickets now.
+  const slaRows = settings().ticketPriorities.slice().reverse().map((p) => {
+    const row = { priority: p, code: sla.code(p), policy: sla.policy(p), response: { met: 0, missed: 0 }, resolution: { met: 0, missed: 0 }, breached: 0, atRisk: 0, open: 0 };
+    for (const t of tv.filter((x) => x.priority === p)) {
+      const st = sla.status(t);
+      if (st.response.doneAt && inRange(st.response.doneAt)) row.response[st.response.state === 'met' ? 'met' : 'missed']++;
+      if (st.resolution.doneAt && inRange(st.resolution.doneAt)) row.resolution[st.resolution.state === 'met' ? 'met' : 'missed']++;
+      if (!tickets.isClosed(t)) {
+        row.open++;
+        const states = [st.response.doneAt ? null : st.response.state, st.resolution.state];
+        if (states.includes('breached')) row.breached++;
+        else if (states.includes('at_risk')) row.atRisk++;
+      }
+    }
+    return row;
+  });
+  const pct = (o) => (o.met + o.missed ? Math.round((o.met / (o.met + o.missed)) * 100) : null);
+  const totals = slaRows.reduce((a, r) => ({ met: a.met + r.resolution.met + r.response.met, missed: a.missed + r.resolution.missed + r.response.missed }), { met: 0, missed: 0 });
   const avgRes = resolved.length ? resolved.reduce((s, t) => s + (new Date(t.resolvedAt) - new Date(t.createdAt)), 0) / resolved.length / 3600000 : 0;
 
   // Project x engineer effort matrix (top projects)
@@ -887,13 +979,14 @@ app.get('/api/dashboard', requireAuth, requirePerm('dashboard', 'view'), (req, r
       totalMinutes: sum(entries), todayMinutes: sum(entries.filter((e) => e.date === today)),
       projectMinutes: sum(entries.filter((e) => e.projectId)), supportMinutes: sum(entries.filter((e) => e.category === 'Customer Support')),
       entries: entries.length, activeProjects: db.where('projects', (p) => p.status === 'Active').length,
-      openTickets: open.length, overdueTickets: open.filter((t) => t.dueAt && new Date(t.dueAt) < new Date()).length,
+      openTickets: open.length, overdueTickets: slaRows.reduce((s, r) => s + r.breached, 0), slaCompliance: pct(totals),
       createdTickets: tv.filter((t) => inRange(t.createdAt)).length, resolvedTickets: resolved.length,
       avgResolutionHours: Math.round(avgRes * 10) / 10, onlineUsers: users.filter((u) => auth.isOnline(u)).length,
       totalUsers: users.length, notLoggedToday: byUser.filter((u) => u.todayMinutes === 0).length,
     },
     byProject, byCategory, byUser, daily, matrix,
-    ticketsByStatus: countBy(open, 'status'), ticketsByPriority: countBy(open, 'priority'),
+    ticketsByStatus: countBy(open, 'status'), ticketsByPriority: Object.fromEntries(Object.entries(countBy(open, 'priority')).map(([k, v]) => [sla.label(k), v])),
+    sla: slaRows.map((r) => ({ ...r, responsePct: pct(r.response), resolutionPct: pct(r.resolution) })),
     ticketsBySource: countBy(tv.filter((t) => inRange(t.createdAt)), 'source'),
     recent: entries.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 8).map(entryOut),
     dailyTargetMinutes: (Number(settings().dailyTargetHours) || 8) * 60,
@@ -940,6 +1033,7 @@ if (require.main === module) {
     app.listen(PORT, HOST, () => {
       console.log(`OpsTrack running at http://localhost:${PORT} (storage: ${process.env.DATABASE_URL ? 'PostgreSQL' : 'file'})`);
       workflow.startScheduler();
+      sla.startChecker();
       email.startInboundPolling();
     });
   }).catch((e) => {
