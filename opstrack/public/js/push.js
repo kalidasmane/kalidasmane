@@ -45,8 +45,10 @@
     else status = here ? `<p class="ok-line">${icon('form', 16)} Push is <b>on</b> for this device.</p>` : '<p class="muted">Push is off for this device.</p>';
 
     const m = App.modal({
-      title: 'Push notifications',
-      body: `${status}
+      title: 'Notifications',
+      body: `<p class="muted">These choices apply to the bell in OpsTrack and to push notifications on your devices.</p>
+        <h4>Push on this device</h4>
+        ${status}
         <div class="row" style="margin:8px 0 16px">
           ${canSupport && Notification.permission !== 'denied' ? (here ? '<button type="button" class="btn" id="pdisable">Turn off on this device</button>' : '<button type="button" class="btn primary" id="penable">Turn on for this device</button>') : ''}
           ${info.devices.length ? '<button type="button" class="btn ghost" id="ptest">Send a test</button>' : ''}
@@ -56,6 +58,7 @@
           <label class="check"><input type="checkbox" name="assigned" ${p.assigned ? 'checked' : ''}> A ticket is assigned to me</label>
           <label class="check"><input type="checkbox" name="updates" ${p.updates ? 'checked' : ''}> Someone else changes a ticket assigned to me</label>
           <label class="check"><input type="checkbox" name="comments" ${p.comments ? 'checked' : ''}> Someone comments on a ticket assigned to me (including requester emails)</label>
+          <label class="check"><input type="checkbox" name="mentions" ${p.mentions ? 'checked' : ''}> Someone @mentions me in a comment</label>
           ${seesAll ? `<label>New tickets<select name="newTickets">${App.options([{ value: 'none', label: 'Don’t notify me' }, { value: 'critical', label: 'Critical only' }, { value: 'high', label: 'High and Critical' }, { value: 'all', label: 'All new tickets' }], p.newTickets)}</select></label>` : ''}
         </div>
         <h4>My devices</h4>

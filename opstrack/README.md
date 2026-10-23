@@ -191,6 +191,28 @@ Put it behind HTTPS (nginx, Caddy, IIS, or your cloud's load balancer).
 | `TRUST_PROXY` | `1` | Number of reverse proxies in front of the app; set to `0` when exposed directly |
 | `HTTPS_PROXY` | – | Outbound proxy for push notifications (e.g. `http://proxy.corp:8080`) |
 
+## In-app notifications
+
+The bell in the top bar shows each person's notifications with an unread count. Notifications arrive
+live (no page refresh) and show a short pop-up. The count also appears in the browser tab title.
+Clicking a notification opens the ticket and marks it read; **Mark all as read** clears the rest.
+Read state is kept in step across all of a person's open tabs.
+
+People get a notification when:
+- a ticket is assigned to them;
+- someone else changes or comments on their ticket (including requester email replies);
+- someone **@mentions** them in a comment. Type `@username`, for example `@amit`. The mention only
+  notifies people who are allowed to see that ticket;
+- a new ticket arrives, if they can see all tickets and chose that.
+
+Nobody is notified about their own changes. Each person picks what they get under user menu →
+**Notification settings**; the same choices apply to the bell and to push notifications. The latest
+200 notifications per person are kept.
+
+Live updates use Server-Sent Events (`/api/notifications/stream`). Render, the `deploy/` installer
+(Caddy) and most proxies work without changes. If you put OpsTrack behind nginx yourself, turn off
+response buffering for that path.
+
 ## Push notifications
 
 Engineers get alerts on their computer or phone, even when OpsTrack isn't open, using the
@@ -198,7 +220,7 @@ standard Web Push built into browsers. No app store app and no third-party accou
 server creates its signing keys (VAPID) on first start and keeps them out of the settings that
 browsers can see.
 
-**To turn it on (each person, on each device):** user menu (top right) → **Push notifications** →
+**To turn it on (each person, on each device):** user menu (top right) → **Notification settings** →
 **Turn on for this device** → allow notifications. **Send a test** checks it works.
 
 | Device | How |
@@ -207,8 +229,9 @@ browsers can see.
 | Android | Chrome or Firefox |
 | iPhone / iPad (iOS 16.4+) | Open OpsTrack in Safari, tap **Share → Add to Home Screen**, open it from the new icon, then turn on push |
 
-**Each person chooses what they get:** a ticket assigned to them, someone else changing or
-commenting on their ticket (including requester email replies), and new tickets. People who can see
+**Each person chooses what they get** (the same choices as the bell, see above): a ticket
+assigned to them, someone else changing or commenting on their ticket (including requester email
+replies), @mentions, and new tickets. People who can see
 all tickets choose *none*, *Critical only*, *High and Critical* or *all* new tickets. Clicking an alert
 opens the ticket. Critical alerts stay on screen until dismissed. Nobody is alerted about their own
 changes.
@@ -384,6 +407,8 @@ lib/auth.js          password hashing (scrypt), sessions, presence, permissions
 lib/seed.js          default profiles, admin user, settings, sample form
 lib/tickets.js       ticket service, workload calculation, notifications
 lib/workflow.js      workflow engine + scheduler
+lib/alerts.js        who is notified about which ticket event (personal preferences, @mentions)
+lib/inbox.js         in-app notifications (the bell) with live updates over Server-Sent Events
 lib/push.js          browser push notifications (Web Push / VAPID)
 public/sw.js         service worker that shows push notifications
 lib/ticketmail.js    email notifications for ticket updates and comments

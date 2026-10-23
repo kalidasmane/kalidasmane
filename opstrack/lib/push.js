@@ -1,10 +1,9 @@
-// Browser push notifications (Web Push + VAPID). Each user enables push per device;
+// Browser push notifications (Web Push + VAPID) – delivery only; lib/alerts.js decides who
+// is notified. Each user enables push per device;
 // the browser's push service (Google, Mozilla, Apple, Microsoft) delivers the alert
 // even when OpsTrack isn't open. The VAPID key pair is generated once and kept in the
 // database outside "settings", because settings are sent to every signed-in browser.
 const db = require('./db');
-
-const DEFAULT_PREFS = { assigned: true, updates: true, comments: true, newTickets: 'none' }; // newTickets: none | critical | high | all
 
 // Only real push services may be used as endpoints, so a client can't make the
 // server send requests to arbitrary (e.g. internal) addresses.
@@ -38,10 +37,6 @@ function validEndpoint(url) {
     if (process.env.PUSH_ALLOW_ANY_ENDPOINT === '1') return /^https?:$/.test(u.protocol); // tests only
     return u.protocol === 'https:' && PUSH_HOSTS.some((re) => re.test(u.hostname));
   } catch { return false; }
-}
-
-function prefsFor(user) {
-  return { ...DEFAULT_PREFS, ...(user.pushPrefs || {}) };
 }
 
 function subscribe(user, sub, userAgent) {
@@ -85,44 +80,4 @@ async function sendToUsers(userIds, payload, event = 'push') {
   return { sent, failed };
 }
 
-function ticketPayload(t, title, body, urgent) {
-  return { title, body, url: `/#/tickets/${t.id}`, tag: t.number, number: t.number, urgent: !!urgent };
-}
-
-const canSeeAll = (u) => {
-  const p = db.find('profiles', u.profileId)?.permissions?.tickets || [];
-  return p.includes('viewAll') || p.includes('assign');
-};
-const PRIORITY_RANK = { critical: ['Critical'], high: ['High', 'Critical'] };
-
-// ---- ticket events (called from the ticket service) ----
-function ticketCreated(t, actor) {
-  const users = db.where('users', (u) => u.active && u.id !== actor?.id && u.id !== t.assigneeId && canSeeAll(u));
-  const ids = users.filter((u) => {
-    const p = prefsFor(u).newTickets;
-    return p === 'all' || (PRIORITY_RANK[p] || []).includes(t.priority);
-  }).map((u) => u.id);
-  if (ids.length) sendToUsers(ids, ticketPayload(t, `New ${t.priority} ticket ${t.number}`, t.subject, t.priority === 'Critical'), 'ticket.created');
-  if (t.assigneeId) ticketAssigned(t, actor);
-}
-
-function ticketAssigned(t, actor) {
-  const u = db.find('users', t.assigneeId);
-  if (!u || u.id === actor?.id || !prefsFor(u).assigned) return;
-  sendToUsers([u.id], ticketPayload(t, `${t.number} assigned to you`, `${t.subject} · ${t.priority}`, t.priority === 'Critical'), 'ticket.assigned');
-}
-
-function ticketUpdated(t, before, changes, actor) {
-  const u = db.find('users', t.assigneeId);
-  if (!u || u.id === actor?.id || before.assigneeId !== t.assigneeId || !prefsFor(u).updates) return;
-  sendToUsers([u.id], ticketPayload(t, `${t.number} updated by ${actor?.name || 'OpsTrack'}`, changes.slice(0, 3).join(' · ') || t.subject), false);
-}
-
-function ticketCommented(t, comment, actor) {
-  const u = db.find('users', t.assigneeId);
-  if (!u || (actor && u.id === actor.id) || !prefsFor(u).comments) return;
-  const who = actor?.name || comment.authorName || 'Someone';
-  sendToUsers([u.id], ticketPayload(t, `${who} ${comment.internal ? 'added a note on' : 'replied on'} ${t.number}`, String(comment.text).slice(0, 140)), false);
-}
-
-module.exports = { DEFAULT_PREFS, publicKey, subscribe, unsubscribe, sendToUsers, prefsFor, ticketCreated, ticketAssigned, ticketUpdated, ticketCommented, validEndpoint };
+module.exports = { publicKey, subscribe, unsubscribe, sendToUsers, validEndpoint };

@@ -80,13 +80,14 @@
           <div class="topbar-actions">
             ${App.can('timesheet', 'create') ? `<button class="btn primary sm" id="quick-log">${icon('plus', 16)}<span>Log time</span></button>` : ''}
             ${App.can('tickets', 'create') ? `<button class="btn sm" id="quick-ticket">${icon('ticket', 16)}<span>New ticket</span></button>` : ''}
+            ${App.bellHtml()}
             <button class="icon-btn" id="theme-btn" title="Toggle theme" aria-label="Toggle theme">${icon(document.documentElement.dataset.theme === 'dark' ? 'sun' : 'moon')}</button>
             ${showSettings ? `<a class="icon-btn" href="#/settings" title="Settings" aria-label="Settings">${icon('settings')}</a>` : ''}
             <div class="me" id="me-menu">
               <button class="me-btn">${App.avatar({ ...me, online: true }, 34)}<span class="me-name"><b>${esc(me.name)}</b><small>${esc(me.profileName)}</small></span></button>
               <div class="me-drop">
                 <div class="me-head"><b>${esc(me.name)}</b><small>${esc(me.email || me.username)}</small><span class="ok">● Online</span></div>
-                <button data-act="push">${icon('chat', 16)} Push notifications</button>
+                <button data-act="push">${icon('bell', 16)} Notification settings</button>
                 <button data-act="password">${icon('key', 16)} Change password</button>
                 <button data-act="logout">${icon('logout', 16)} Sign out</button>
               </div>
@@ -144,6 +145,7 @@
     document.getElementById('sidebar')?.classList.remove('open');
     document.getElementById('page-title').textContent = page.title;
     document.title = `${page.title} · ${App.meta.settings.companyName}`;
+    App.applyUnreadTitle();
     App.destroyCharts?.();
     const seq = ++renderSeq;
     el.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
@@ -168,7 +170,7 @@
       } catch { /* handled by api() */ }
     }, 30000);
   }
-  function stopHeartbeat() { clearInterval(hb); hb = null; App.me = null; }
+  function stopHeartbeat() { clearInterval(hb); hb = null; App.me = null; App.stopInbox(); }
 
   async function boot() {
     try {
@@ -176,6 +178,7 @@
       App.me = me.user; App.perms = me.permissions;
       await App.refreshMeta();
       shell();
+      App.initInbox();
       startHeartbeat();
       App.registerServiceWorker();
       if (!location.hash) location.hash = '#/dashboard';
