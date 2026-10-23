@@ -129,7 +129,7 @@ legend { font-size: 12.5px; font-weight: 600; color: var(--text-2); padding: 0 6
 @keyframes pulse { 70% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0); } 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); } }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 14px; padding: 12px 26px; background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
-.topbar h1 { font-size: 19px; letter-spacing: -.01em; flex: 1; }
+.topbar h1 { font-size: 19px; letter-spacing: -.01em; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
 .me { position: relative; }
 .me-btn { display: flex; align-items: center; gap: 10px; background: none; border: 0; cursor: pointer; color: var(--text); padding: 3px 6px; border-radius: 10px; font: inherit; text-align: left; }
@@ -614,3 +614,63 @@ tr.retired td { opacity: .55; }
 .lbl { display: block; font-size: 12.5px; font-weight: 600; color: var(--text-2); margin-bottom: 6px; }
 .settings-form > section.card { margin-bottom: 16px; }
 .table td.subject { min-width: 200px; }
+
+/* ---------- problems & changes ---------- */
+.st-under-investigation, .st-implementing, .st-awaiting-approval { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.st-root-cause-identified, .st-scheduled { background: var(--brand-soft); color: var(--brand); border-color: transparent; }
+.st-known-error { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+:root[data-theme="dark"] .st-known-error { background: rgba(245, 158, 11, .15); color: #fcd34d; border-color: rgba(245, 158, 11, .4); }
+.st-assessment, .st-review { background: var(--info-soft); color: #0369a1; border-color: transparent; }
+:root[data-theme="dark"] .st-assessment, :root[data-theme="dark"] .st-review { color: #7dd3fc; }
+.st-approved { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.st-rejected { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
+.st-draft, .st-cancelled { background: var(--surface-2); color: var(--muted); }
+.stepper { list-style: none; display: flex; flex-wrap: wrap; gap: 4px; padding: 0; margin: 12px 0; counter-reset: st; }
+.stepper li { counter-increment: st; font-size: 12px; font-weight: 600; color: var(--muted); background: var(--surface-2); border: 1px solid var(--line); border-radius: 99px; padding: 3px 10px 3px 4px; display: inline-flex; align-items: center; gap: 6px; }
+.stepper li::before { content: counter(st); display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--line); color: var(--text-2); font-size: 11px; }
+.stepper li.done { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+.stepper li.done::before { content: '✓'; background: var(--ok); color: #fff; }
+.stepper li.now { color: var(--brand); background: var(--brand-soft); border-color: color-mix(in srgb, var(--brand) 40%, transparent); }
+.stepper li.now::before { background: var(--brand); color: #fff; }
+.card > header form.row input { padding: 6px 10px; }
+.kedb { display: grid; gap: 12px; padding: 14px; }
+.kedb-item { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; cursor: pointer; background: var(--surface); }
+.kedb-item:hover { border-color: var(--brand); }
+.kedb-item header { display: flex; align-items: center; gap: 8px; }
+.kedb-item h4 { margin: 8px 0 6px; }
+.kedb-item p { margin: 6px 0 0; font-size: 13.5px; }
+.workaround { background: var(--warn-soft); border-radius: 8px; padding: 8px 10px; color: var(--text); }
+.workaround .btn { margin-top: 6px; }
+.linked-rec { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; }
+.linked-rec span { display: flex; flex-direction: column; min-width: 0; }
+.kedb-match { border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+.kedb-match .row { margin-top: 4px; }
+.warn-card { border-color: #f59e0b; }
+.warn-card header h3 { color: var(--warn); display: flex; align-items: center; gap: 6px; }
+.schedule { padding: 6px 16px 16px; }
+.schedule h4 { margin: 16px 0 8px; font-size: 13px; color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; }
+.sched-item { display: flex; align-items: center; gap: 14px; padding: 10px 12px; border: 1px solid var(--line); border-left: 4px solid var(--brand); border-radius: 8px; margin-bottom: 8px; color: var(--text); text-decoration: none; background: var(--surface); flex-wrap: wrap; }
+.sched-item:hover { background: var(--surface-2); }
+.sched-item.clash { border-left-color: var(--bad); }
+.sched-time { font-weight: 700; font-variant-numeric: tabular-nums; min-width: 120px; }
+.sched-body { flex: 1; min-width: 200px; display: flex; flex-direction: column; }
+.sched-body small { color: var(--muted); }
+.sched-item.clash .sched-body small { color: var(--bad); }
+.sched-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.check-grid label small { font-weight: 400; }
+.mini-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+.mini-kpis a { display: flex; flex-direction: column; padding: 10px; border: 1px solid var(--line); border-radius: 10px; color: var(--text); text-decoration: none; background: var(--surface-2); }
+.mini-kpis a:hover { border-color: var(--brand); }
+.mini-kpis strong { font-size: 22px; }
+.mini-kpis span { font-size: 12px; color: var(--muted); }
+.mini-kpis a.bad strong { color: var(--bad); }
+.mini-kpis a.warn strong { color: var(--warn); }
+@media (max-width: 640px) { .mini-kpis { grid-template-columns: repeat(2, 1fr); } }
+.me-drop .menu-theme { display: none; }
+@media (max-width: 420px) {
+  .topbar { gap: 8px; padding: 10px 12px; }
+  .topbar-actions .icon-btn { width: 34px; height: 34px; }
+  #theme-btn { display: none; }
+  .me-drop .menu-theme { display: flex; }
+}
+.ticket-layout > * { min-width: 0; }

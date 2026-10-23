@@ -12,6 +12,8 @@ const MODULES = {
   timesheet: { label: 'Daily Tracker', actions: ['view', 'create', 'edit', 'delete', 'viewAll'] },
   tickets: { label: 'Tickets', actions: ['view', 'create', 'edit', 'delete', 'viewAll', 'assign'] },
   projects: { label: 'Projects', actions: ['view', 'create', 'edit', 'delete'] },
+  problems: { label: 'Problems', actions: ['view', 'create', 'edit', 'delete'] },
+  changes: { label: 'Changes', actions: ['view', 'create', 'edit', 'delete', 'approve'] },
   devices: { label: 'Devices & Remote', actions: ['view', 'create', 'edit', 'delete', 'connect'] },
   reports: { label: 'Reports', actions: ['view'] },
   users: { label: 'Users', actions: ['view', 'create', 'edit', 'delete'] },

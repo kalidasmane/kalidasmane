@@ -19,6 +19,11 @@ A self-hosted web application for engineering and support teams that combines:
   from impact × urgency, response and resolution SLAs (24×7 or business hours), on-hold pausing,
   escalation, resolution codes, auto-close and reopen; plus conversation, internal notes,
   history and time logging against tickets. See [SLA and priority (ITIL)](#sla-and-priority-itil).
+- **Problem Management (ITIL)** – root-cause analysis for recurring incidents, a Known Error
+  Database with workarounds suggested on matching tickets, and bulk resolution of linked incidents.
+- **Change Management (ITIL)** – requests for change (standard / normal / emergency), risk and
+  backout plans, CAB / ECAB approval, a change schedule with clash detection and post-implementation
+  review. See [Problem and Change Management](#problem-and-change-management-itil).
 - **Devices & Remote** – inventory of PCs, servers and network devices, with one-click
   **remote desktop, terminal and file sessions** through MeshCentral or Apache Guacamole.
   Sessions open inside OpsTrack with a timer and notes. When an engineer ends a session,
@@ -249,6 +254,71 @@ hand. Email and API callers can send `P1`…`P4` or the priority name.
 Changing targets recalculates open tickets straight away. Older databases are upgraded
 automatically; a custom "hours to resolve" setting carries over as the resolution target.
 
+## Problem and Change Management (ITIL)
+
+### Problems
+A **problem** is the unknown underlying cause of one or more incidents. Open **Problems** in the
+sidebar, or press **Create problem** on a ticket.
+
+| Status | Meaning |
+|--------|---------|
+| New | Logged, not investigated yet |
+| Under Investigation | Diagnosing the root cause |
+| Root Cause Identified | The cause is known; a fix is being worked on |
+| Known Error | Root cause and workaround documented (needs a workaround) |
+| Resolved / Closed | Permanent fix in place (needs the root cause and the fix) |
+
+- **Investigation:**
+  - Record the root cause, the workaround and the permanent fix.
+  - Link the incidents the problem causes, either from the problem or from the ticket.
+  - Priority uses the same impact × urgency matrix as tickets.
+- **Known Error Database:**
+  - The *Known errors* tab lists every problem with a documented workaround.
+  - When an engineer opens a ticket that looks like a known error (shared words in the subject and
+    description, same category), the ticket shows it. They can **use the workaround in the reply**,
+    or **link** the ticket to the problem in one click.
+- **Share workaround:** posts the workaround as a reply on every open linked incident. Requesters
+  are emailed.
+- **Raise change for the fix:** creates a change request linked to the problem. When that change
+  is closed, the problem owner is told.
+- **Resolve linked incidents:** once the fix is in place, resolves every open linked incident with
+  the fix as its resolution notes.
+
+### Changes
+Every change to live services is raised as a **request for change (RFC)**: open **Changes** in the
+sidebar, or press **Raise change** on a ticket or problem.
+
+| Type | Approval |
+|------|----------|
+| Standard (pre-approved) | None. Low risk and done often, so it is approved as soon as it is submitted |
+| Normal | Assessed, then approved by **every** chosen CAB member; one rejection rejects it |
+| Emergency | Fixes or prevents a major incident now; **one** ECAB approval is enough |
+
+Lifecycle: **Draft → Assessment → Awaiting Approval → Approved → Scheduled → Implementing →
+Review → Closed**, plus Rejected (can be reworked as a new draft) and Cancelled.
+
+- **Before submitting:** a normal or emergency change needs a reason, an implementation plan, a
+  backout plan and a planned window. A test plan, risk, impact and the affected devices are also
+  recorded.
+- **Approval:**
+  - CAB members are the users whose profile has the **approve** permission on Changes. By default
+    these are managers, team leads and administrators.
+  - They are asked by bell, push and email, and approve or reject with a comment.
+  - The requester and the change owner hear the decision.
+  - Changing the plan, window, risk, type or devices after approval sends the change back for
+    approval.
+- **Schedule:** shows the next 30 days. Changes that overlap on the same device, and two high-risk
+  changes at the same time, are flagged as **clashes**, here and on the change itself.
+- **Implementation:** start the change, then record the outcome: *Successful*, *Successful with
+  issues* or *Failed – backed out*.
+- **Closing:** a post-implementation review note is needed to close the change.
+- **Dashboard:** *Problems* and *Changes* widgets show open problems, known errors, changes
+  awaiting your approval, the next 7 days' schedule and the change success rate.
+
+**Permissions:** Profiles have *Problems* (view, create, edit, delete) and *Changes* (view, create,
+edit, delete, approve) modules. Existing roles get access matching what they can do with tickets.
+Number prefixes (PRB, CHG) can be changed under Settings → General.
+
 ## In-app notifications
 
 The bell in the top bar shows each person's notifications with an unread count. Notifications arrive
@@ -466,6 +536,8 @@ lib/auth.js          password hashing (scrypt), sessions, presence, permissions
 lib/seed.js          default profiles, admin user, settings, sample form
 lib/tickets.js       ticket service, workload calculation, notifications
 lib/workflow.js      workflow engine + scheduler
+lib/problems.js      ITIL problem management: root cause, known errors, linked incidents
+lib/changes.js       ITIL change management: RFC lifecycle, CAB approval, schedule clashes
 lib/sla.js           ITIL priority matrix, SLA clocks (business hours, pausing), warnings, escalation, auto-close
 lib/alerts.js        who is notified about which ticket event (personal preferences, @mentions)
 lib/inbox.js         in-app notifications (the bell) with live updates over Server-Sent Events

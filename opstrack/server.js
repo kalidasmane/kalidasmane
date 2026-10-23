@@ -13,6 +13,8 @@ const push = require('./lib/push');
 const alerts = require('./lib/alerts');
 const inbox = require('./lib/inbox');
 const sla = require('./lib/sla');
+const problems = require('./lib/problems');
+const changes = require('./lib/changes');
 
 const app = express();
 app.disable('x-powered-by');
@@ -104,6 +106,7 @@ app.get('/api/meta', requireAuth, (req, res) => {
     profiles: db.all('profiles').map((p) => pick(p, ['id', 'name', 'color'])),
     forms: db.all('forms').map((f) => pick(f, ['id', 'name', 'active', 'public'])),
     itil: { levels: sla.LEVELS, impact: sla.IMPACT, urgency: sla.URGENCY, resolutionCodes: sla.RESOLUTION_CODES, holdReasons: sla.HOLD_REASONS, defaults: sla.DEFAULTS, matrix: sla.cfg().matrix, pauseStatuses: sla.cfg().pauseStatuses, requireResolution: sla.cfg().requireResolution },
+    itsm: { problemStatuses: problems.STATUSES, changeTypes: changes.TYPES, changeStatuses: changes.STATUSES, risks: changes.RISKS, outcomes: changes.OUTCOMES },
     workflowMeta: { triggers: workflow.TRIGGERS, operators: workflow.OPERATORS, actions: workflow.ACTIONS },
     emailProviders: email.PROVIDERS,
     remoteProviders: remote.PROVIDERS,
@@ -174,6 +177,11 @@ app.delete('/api/users/:id', requireAuth, requirePerm('users', 'delete'), (req, 
   }
   for (const x of db.all('users')) if (x.managerId === u.id) x.managerId = u.managerId || null;
   for (const t of db.all('tickets')) if (t.assigneeId === u.id && !tickets.isClosed(t)) t.assigneeId = null;
+  for (const p of db.all('problems')) if (p.assigneeId === u.id && !problems.isClosed(p)) p.assigneeId = null;
+  for (const c of db.all('changes')) {
+    if (c.assigneeId === u.id && !changes.isFinal(c)) c.assigneeId = null;
+    if (c.status === 'Awaiting Approval') c.approverIds = c.approverIds.filter((id) => id !== u.id);
+  }
   auth.destroyUserSessions(u.id);
   for (const x of db.where('pushSubs', (p) => p.userId === u.id)) db.remove('pushSubs', x.id);
   db.state.inbox = db.all('inbox').filter((n) => n.userId !== u.id);
@@ -389,6 +397,8 @@ function ticketOut(t, full = false) {
     overdue: st.resolution.state === 'breached' && !tickets.isClosed(t),
     slaBreached: st.response.state === 'breached' || st.resolution.state === 'breached',
     commentCount: (t.comments || []).filter((c) => !c.system).length,
+    problem: t.problemId ? pick(db.find('problems', t.problemId) || {}, ['id', 'number', 'title', 'status', 'workaround', 'knownError']) : null,
+    changes: (t.changeIds || []).map((id) => db.find('changes', id)).filter(Boolean).map((c) => pick(c, ['id', 'number', 'title', 'status'])),
   };
   if (!full) delete out.comments;
   return out;
@@ -454,6 +464,206 @@ app.post('/api/tickets/:id/comments', requireAuth, requirePerm('tickets', 'view'
   if (!req.body?.text) return bad(res, 'Comment text is required');
   tickets.addComment(t, req.body.text, req.user, { internal: !!req.body.internal });
   res.json(ticketOut(t, true));
+});
+
+// ---------- problems (ITIL problem management) ----------
+function problemOut(p, full = false) {
+  const incidents = (p.incidentIds || []).map((id) => db.find('tickets', id)).filter(Boolean);
+  const out = {
+    ...p, priorityCode: sla.code(p.priority), assigneeName: db.find('users', p.assigneeId)?.name || null,
+    projectName: db.find('projects', p.projectId)?.name || null, createdByName: db.find('users', p.createdById)?.name || null,
+    incidentCount: incidents.length, openIncidents: incidents.filter((t) => !tickets.isClosed(t)).length,
+  };
+  if (full) {
+    out.incidents = incidents.map((t) => ({ ...pick(t, ['id', 'number', 'subject', 'status', 'priority', 'assigneeId', 'createdAt', 'requesterName']), assigneeName: db.find('users', t.assigneeId)?.name || null, closed: tickets.isClosed(t) }));
+    out.changes = (p.changeIds || []).map((id) => db.find('changes', id)).filter(Boolean).map((c) => pick(c, ['id', 'number', 'title', 'status', 'type', 'outcome']));
+  } else delete out.comments;
+  return out;
+}
+
+app.get('/api/problems', requireAuth, requirePerm('problems', 'view'), (req, res) => {
+  const q = req.query;
+  const text = String(q.q || '').toLowerCase();
+  const list = db.where('problems', (p) => (!q.status || (q.status === 'open' ? !problems.isClosed(p) : q.status === 'known' ? p.knownError && p.status !== 'Closed' : p.status === q.status))
+    && (!q.assigneeId || p.assigneeId === q.assigneeId)
+    && (!text || `${p.number} ${p.title} ${p.description} ${p.rootCause} ${p.workaround}`.toLowerCase().includes(text)))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  res.json(list.map((p) => problemOut(p)));
+});
+
+app.get('/api/problems/:id', requireAuth, requirePerm('problems', 'view'), (req, res) => {
+  const p = db.find('problems', req.params.id);
+  if (!p) return bad(res, 'Problem not found', 404);
+  res.json(problemOut(p, true));
+});
+
+app.post('/api/problems', requireAuth, requirePerm('problems', 'create'), (req, res) => {
+  const b = req.body || {};
+  if (!String(b.title || '').trim()) return bad(res, 'Title is required');
+  const incidentIds = (b.incidentIds || []).filter((id) => { const t = db.find('tickets', id); return t && visibleTicket(req.user, t); });
+  const p = problems.create({ ...pick(b, ['title', 'description', 'category', 'impact', 'urgency', 'priority', 'assigneeId', 'projectId']), incidentIds }, req.user);
+  res.json(problemOut(p, true));
+});
+
+app.put('/api/problems/:id', requireAuth, requirePerm('problems', 'edit'), (req, res) => {
+  const p = db.find('problems', req.params.id);
+  if (!p) return bad(res, 'Problem not found', 404);
+  const b = req.body || {};
+  const next = { ...p, ...pick(b, problems.FIELDS) };
+  if (b.status && b.status !== p.status) {
+    if (b.status === 'Known Error' && !String(next.workaround || '').trim()) return bad(res, 'Document the workaround before marking the problem as a known error');
+    if (problems.CLOSED.includes(b.status) && (!String(next.rootCause || '').trim() || !String(next.resolution || '').trim())) return bad(res, 'Record the root cause and the permanent fix before resolving the problem');
+  }
+  if (b.knownError === true && !String(next.workaround || '').trim()) return bad(res, 'A known error needs a workaround');
+  problems.update(p, b, req.user);
+  res.json(problemOut(p, true));
+});
+
+app.delete('/api/problems/:id', requireAuth, requirePerm('problems', 'delete'), (req, res) => {
+  const p = db.find('problems', req.params.id);
+  if (!p) return bad(res, 'Problem not found', 404);
+  for (const t of db.all('tickets')) if (t.problemId === p.id) t.problemId = null;
+  for (const c of db.all('changes')) if (c.problemId === p.id) c.problemId = null;
+  db.remove('problems', p.id);
+  res.json({ ok: true });
+});
+
+function linkIncident(op) {
+  return (req, res) => {
+    const p = db.find('problems', req.params.id);
+    const t = db.find('tickets', req.body?.ticketId) || db.all('tickets').find((x) => x.number.toUpperCase() === String(req.body?.ticketNumber || '').trim().toUpperCase());
+    if (!p) return bad(res, 'Problem not found', 404);
+    if (!t || !visibleTicket(req.user, t)) return bad(res, 'Ticket not found', 404);
+    if (op === 'link') problems.link(p, t, req.user); else problems.unlink(p, t, req.user);
+    res.json(problemOut(p, true));
+  };
+}
+app.post('/api/problems/:id/link', requireAuth, requirePerm('problems', 'edit'), linkIncident('link'));
+app.post('/api/problems/:id/unlink', requireAuth, requirePerm('problems', 'edit'), linkIncident('unlink'));
+
+app.post('/api/problems/:id/share-workaround', requireAuth, requirePerm('problems', 'edit'), (req, res) => {
+  const p = db.find('problems', req.params.id);
+  if (!p) return bad(res, 'Problem not found', 404);
+  if (!p.workaround) return bad(res, 'Document the workaround first');
+  res.json({ count: problems.shareWorkaround(p, req.user), problem: problemOut(p, true) });
+});
+
+app.post('/api/problems/:id/resolve-incidents', requireAuth, requirePerm('problems', 'edit'), (req, res) => {
+  const p = db.find('problems', req.params.id);
+  if (!p) return bad(res, 'Problem not found', 404);
+  if (!p.resolution) return bad(res, 'Record the permanent fix first');
+  res.json({ count: problems.resolveIncidents(p, req.user), problem: problemOut(p, true) });
+});
+
+app.post('/api/problems/:id/comments', requireAuth, requirePerm('problems', 'view'), (req, res) => {
+  const p = db.find('problems', req.params.id);
+  if (!p) return bad(res, 'Problem not found', 404);
+  if (!String(req.body?.text || '').trim()) return bad(res, 'Note text is required');
+  p.comments.push({ id: db.uid(), at: db.now(), authorId: req.user.id, authorName: req.user.name, text: String(req.body.text), internal: true });
+  p.updatedAt = db.now();
+  db.save();
+  res.json(problemOut(p, true));
+});
+
+// Known errors that match a ticket – shown on the incident so the workaround can be reused.
+app.get('/api/tickets/:id/known-errors', requireAuth, requirePerm('tickets', 'view'), (req, res) => {
+  const t = db.find('tickets', req.params.id);
+  if (!t || !visibleTicket(req.user, t)) return bad(res, 'Ticket not found', 404);
+  if (!can(req.user, 'problems', 'view')) return res.json([]);
+  res.json(problems.knownErrorsFor(t).map((p) => pick(p, ['id', 'number', 'title', 'workaround', 'status'])));
+});
+
+// ---------- changes (ITIL change management) ----------
+function changeOut(c, full = false) {
+  const conflictList = changes.conflicts(c);
+  const out = {
+    ...c, assigneeName: db.find('users', c.assigneeId)?.name || null, requestedByName: db.find('users', c.requestedById)?.name || null,
+    problemNumber: db.find('problems', c.problemId)?.number || null, conflictCount: conflictList.length,
+    deviceNames: (c.deviceIds || []).map((id) => db.find('devices', id)?.name).filter(Boolean),
+  };
+  if (full) {
+    out.conflicts = conflictList;
+    out.approvers = (c.approverIds || []).map((id) => ({ id, name: db.find('users', id)?.name || 'Deleted user', decision: c.approvals.find((a) => a.userId === id) || null }));
+    out.incidents = (c.incidentIds || []).map((id) => db.find('tickets', id)).filter(Boolean).map((t) => pick(t, ['id', 'number', 'subject', 'status']));
+  } else delete out.comments;
+  return out;
+}
+
+app.get('/api/changes', requireAuth, requirePerm('changes', 'view'), (req, res) => {
+  const q = req.query;
+  const text = String(q.q || '').toLowerCase();
+  const list = db.where('changes', (c) => (!q.status || (q.status === 'open' ? !changes.isFinal(c) : q.status === 'mine' ? c.status === 'Awaiting Approval' && c.approverIds.includes(req.user.id) && !c.approvals.some((a) => a.userId === req.user.id) : c.status === q.status))
+    && (!q.type || c.type === q.type)
+    && (!text || `${c.number} ${c.title} ${c.description}`.toLowerCase().includes(text)))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  res.json(list.map((c) => changeOut(c)));
+});
+
+// Forward schedule of change: everything planned in a date range, with conflicts.
+app.get('/api/changes/schedule', requireAuth, requirePerm('changes', 'view'), (req, res) => {
+  const from = String(req.query.from || new Date().toISOString().slice(0, 10));
+  const to = String(req.query.to || new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10));
+  const list = db.where('changes', (c) => c.plannedStart && !['Draft', 'Rejected', 'Cancelled'].includes(c.status)
+    && c.plannedStart.slice(0, 10) <= to && (c.plannedEnd || c.plannedStart).slice(0, 10) >= from)
+    .sort((a, b) => a.plannedStart.localeCompare(b.plannedStart));
+  res.json(list.map((c) => ({ ...changeOut(c), conflicts: changes.conflicts(c) })));
+});
+
+app.get('/api/changes/approvers', requireAuth, requirePerm('changes', 'view'), (req, res) => {
+  res.json(changes.approvers().map((u) => ({ id: u.id, name: u.name, designation: u.designation })));
+});
+
+app.get('/api/changes/:id', requireAuth, requirePerm('changes', 'view'), (req, res) => {
+  const c = db.find('changes', req.params.id);
+  if (!c) return bad(res, 'Change not found', 404);
+  res.json(changeOut(c, true));
+});
+
+app.post('/api/changes', requireAuth, requirePerm('changes', 'create'), (req, res) => {
+  const b = req.body || {};
+  if (!String(b.title || '').trim()) return bad(res, 'Title is required');
+  if (b.problemId && !can(req.user, 'problems', 'view')) delete b.problemId;
+  const incidentIds = (b.incidentIds || []).filter((id) => { const t = db.find('tickets', id); return t && visibleTicket(req.user, t); });
+  const c = changes.create({ ...pick(b, changes.FIELDS), incidentIds }, req.user);
+  res.json(changeOut(c, true));
+});
+
+app.put('/api/changes/:id', requireAuth, requirePerm('changes', 'edit'), (req, res) => {
+  const c = db.find('changes', req.params.id);
+  if (!c) return bad(res, 'Change not found', 404);
+  const r = changes.update(c, req.body || {}, req.user);
+  if (r.error) return bad(res, r.error);
+  res.json(changeOut(c, true));
+});
+
+app.post('/api/changes/:id/action', requireAuth, requirePerm('changes', 'view'), (req, res) => {
+  const c = db.find('changes', req.params.id);
+  if (!c) return bad(res, 'Change not found', 404);
+  const action = String(req.body?.action || '');
+  const needed = ['approve', 'reject'].includes(action) ? 'approve' : 'edit';
+  if (!can(req.user, 'changes', needed)) return bad(res, 'You do not have permission to do that', 403);
+  const r = changes.act(c, action, req.user, req.body || {});
+  if (r.error) return bad(res, r.error);
+  res.json(changeOut(c, true));
+});
+
+app.post('/api/changes/:id/comments', requireAuth, requirePerm('changes', 'view'), (req, res) => {
+  const c = db.find('changes', req.params.id);
+  if (!c) return bad(res, 'Change not found', 404);
+  if (!String(req.body?.text || '').trim()) return bad(res, 'Note text is required');
+  c.comments.push({ id: db.uid(), at: db.now(), authorId: req.user.id, authorName: req.user.name, text: String(req.body.text), internal: true });
+  c.updatedAt = db.now();
+  db.save();
+  res.json(changeOut(c, true));
+});
+
+app.delete('/api/changes/:id', requireAuth, requirePerm('changes', 'delete'), (req, res) => {
+  const c = db.find('changes', req.params.id);
+  if (!c) return bad(res, 'Change not found', 404);
+  for (const p of db.all('problems')) p.changeIds = (p.changeIds || []).filter((id) => id !== c.id);
+  for (const t of db.all('tickets')) if (t.changeIds) t.changeIds = t.changeIds.filter((id) => id !== c.id);
+  db.remove('changes', c.id);
+  res.json({ ok: true });
 });
 
 // ---------- devices & remote sessions ----------
@@ -718,7 +928,7 @@ app.post('/api/push/unsubscribe', requireAuth, (req, res) => {
 app.put('/api/push/prefs', requireAuth, (req, res) => {
   const b = req.body || {};
   const p = alerts.prefsFor(req.user);
-  for (const k of ['assigned', 'updates', 'comments', 'mentions', 'sla']) if (k in b) p[k] = b[k] === true;
+  for (const k of ['assigned', 'updates', 'comments', 'mentions', 'sla', 'approvals']) if (k in b) p[k] = b[k] === true;
   if (['none', 'critical', 'high', 'all'].includes(b.newTickets)) p.newTickets = b.newTickets;
   db.update('users', req.user.id, { pushPrefs: p });
   res.json(p);
@@ -871,7 +1081,7 @@ app.get('/api/settings', requireAuth, requirePerm('settings', 'view'), (req, res
 app.put('/api/settings', requireAuth, requirePerm('settings', 'edit'), (req, res) => {
   const b = req.body || {};
   const listKeys = ['activityCategories', 'ticketCategories', 'ticketPriorities', 'ticketStatuses', 'closedStatuses'];
-  const patch = pick(b, ['companyName', 'publicUrl', 'ticketPrefix', 'workloadGreenMax', 'dailyTargetHours', 'notifyOnAssign', 'notifyRequesterOnCreate', ...listKeys]);
+  const patch = pick(b, ['companyName', 'publicUrl', 'ticketPrefix', 'problemPrefix', 'changePrefix', 'workloadGreenMax', 'dailyTargetHours', 'notifyOnAssign', 'notifyRequesterOnCreate', ...listKeys]);
   if (b.emailNotify && typeof b.emailNotify === 'object') {
     const e = pick(b.emailNotify, ['requesterOnStatus', 'requesterStatuses', 'requesterOnReply', 'assigneeOnUpdate', 'assigneeOnComment', 'watchersOnUpdate']);
     for (const k of Object.keys(e)) if (k !== 'requesterStatuses') e[k] = e[k] === true;
@@ -893,6 +1103,10 @@ app.put('/api/settings', requireAuth, requirePerm('settings', 'edit'), (req, res
   }
   if (patch.publicUrl && !/^https?:\/\/\S+$/i.test(patch.publicUrl)) return bad(res, 'OpsTrack address must start with http:// or https://');
   if (patch.ticketPrefix) patch.ticketPrefix = patch.ticketPrefix.toUpperCase().replace(/[^A-Z0-9]/g, '') || 'INC';
+  if (patch.problemPrefix) patch.problemPrefix = patch.problemPrefix.toUpperCase().replace(/[^A-Z0-9]/g, '') || 'PRB';
+  if (patch.changePrefix) patch.changePrefix = patch.changePrefix.toUpperCase().replace(/[^A-Z0-9]/g, '') || 'CHG';
+  const prefixes = ['ticketPrefix', 'problemPrefix', 'changePrefix'].map((k) => patch[k] || settings()[k]);
+  if (new Set(prefixes).size < 3) return bad(res, 'Ticket, problem and change prefixes must be different');
   Object.assign(db.state.settings, patch);
   // New targets apply to open tickets straight away.
   if (patch.sla || patch.ticketPriorities) for (const t of db.all('tickets')) if (!tickets.isClosed(t)) { sla.apply(t); sla.markCurrent(t); }
@@ -901,6 +1115,35 @@ app.put('/api/settings', requireAuth, requirePerm('settings', 'edit'), (req, res
 });
 
 // ---------- dashboard & reports ----------
+// Problem and change figures for the dashboard (only for people who can see them).
+function itsmSummary(user) {
+  const out = {};
+  if (can(user, 'problems', 'view')) {
+    const open = db.where('problems', (p) => !problems.isClosed(p));
+    out.problems = {
+      open: open.length, knownErrors: db.where('problems', (p) => p.knownError && p.status !== 'Closed').length,
+      unassigned: open.filter((p) => !p.assigneeId).length,
+      incidentsLinked: open.reduce((s, p) => s + (p.incidentIds || []).filter((id) => { const t = db.find('tickets', id); return t && !tickets.isClosed(t); }).length, 0),
+      top: open.sort((a, b) => (b.incidentIds?.length || 0) - (a.incidentIds?.length || 0)).slice(0, 4).map((p) => ({ ...pick(p, ['id', 'number', 'title', 'status', 'priority']), incidents: (p.incidentIds || []).length })),
+    };
+  }
+  if (can(user, 'changes', 'view')) {
+    const now = new Date().toISOString(); const week = new Date(Date.now() + 7 * 86400000).toISOString();
+    const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString();
+    const done = db.where('changes', (c) => c.outcome && (c.actualEnd || '') >= monthAgo);
+    out.changes = {
+      awaitingApproval: db.where('changes', (c) => c.status === 'Awaiting Approval').length,
+      awaitingMe: db.where('changes', (c) => c.status === 'Awaiting Approval' && c.approverIds.includes(user.id) && !c.approvals.some((a) => a.userId === user.id)).length,
+      next7: db.where('changes', (c) => ['Approved', 'Scheduled'].includes(c.status) && c.plannedStart && c.plannedStart >= now && c.plannedStart <= week).length,
+      implementing: db.where('changes', (c) => c.status === 'Implementing').length,
+      successRate: done.length ? Math.round((done.filter((c) => c.outcome === 'Successful').length / done.length) * 100) : null,
+      failed30: done.filter((c) => c.outcome.startsWith('Failed')).length,
+      upcoming: db.where('changes', (c) => ['Approved', 'Scheduled', 'Implementing'].includes(c.status) && c.plannedStart && (c.plannedEnd || c.plannedStart) >= now)
+        .sort((a, b) => a.plannedStart.localeCompare(b.plannedStart)).slice(0, 4).map((c) => pick(c, ['id', 'number', 'title', 'status', 'type', 'risk', 'plannedStart'])),
+    };
+  }
+  return out;
+}
 const dayStr = (d) => d.toISOString().slice(0, 10);
 
 app.get('/api/dashboard', requireAuth, requirePerm('dashboard', 'view'), (req, res) => {
@@ -987,6 +1230,7 @@ app.get('/api/dashboard', requireAuth, requirePerm('dashboard', 'view'), (req, r
     byProject, byCategory, byUser, daily, matrix,
     ticketsByStatus: countBy(open, 'status'), ticketsByPriority: Object.fromEntries(Object.entries(countBy(open, 'priority')).map(([k, v]) => [sla.label(k), v])),
     sla: slaRows.map((r) => ({ ...r, responsePct: pct(r.response), resolutionPct: pct(r.resolution) })),
+    itsm: itsmSummary(req.user),
     ticketsBySource: countBy(tv.filter((t) => inRange(t.createdAt)), 'source'),
     recent: entries.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 8).map(entryOut),
     dailyTargetMinutes: (Number(settings().dailyTargetHours) || 8) * 60,

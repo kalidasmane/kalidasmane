@@ -59,6 +59,7 @@
           <label class="check"><input type="checkbox" name="updates" ${p.updates ? 'checked' : ''}> Someone else changes a ticket assigned to me</label>
           <label class="check"><input type="checkbox" name="comments" ${p.comments ? 'checked' : ''}> Someone comments on a ticket assigned to me (including requester emails)</label>
           <label class="check"><input type="checkbox" name="mentions" ${p.mentions ? 'checked' : ''}> Someone @mentions me in a comment</label>
+          ${App.can('changes') ? `<label class="check"><input type="checkbox" name="approvals" ${p.approvals ? 'checked' : ''}> Change approvals: I'm asked to approve, or my change is approved / rejected</label>` : ''}
           <label class="check"><input type="checkbox" name="sla" ${p.sla ? 'checked' : ''}> SLA warnings and breaches on my tickets (and my team's, for managers)</label>
           ${seesAll ? `<label>New tickets<select name="newTickets">${App.options([{ value: 'none', label: 'Don’t notify me' }, { value: 'critical', label: 'Critical only' }, { value: 'high', label: 'High and Critical' }, { value: 'all', label: 'All new tickets' }], p.newTickets)}</select></label>` : ''}
         </div>

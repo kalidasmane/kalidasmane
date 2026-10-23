@@ -433,6 +433,8 @@
     el.innerHTML = `<form class="card settings-form" id="gs"><div class="form-grid">
       <label>Workspace name<input name="companyName" value="${esc(s.companyName)}"></label>
       <label>Ticket number prefix<input name="ticketPrefix" value="${esc(s.ticketPrefix)}" maxlength="6"></label>
+      <label>Problem number prefix<input name="problemPrefix" value="${esc(s.problemPrefix || 'PRB')}" maxlength="6"></label>
+      <label>Change number prefix<input name="changePrefix" value="${esc(s.changePrefix || 'CHG')}" maxlength="6"></label>
       <label>Daily target hours (per engineer)<input type="number" step="0.5" name="dailyTargetHours" value="${esc(s.dailyTargetHours)}"></label>
       <label>Workload: green up to N open tickets<input type="number" min="1" name="workloadGreenMax" value="${esc(s.workloadGreenMax)}"></label>
       <div class="span2 legend-row big"><span class="light light-free"><b></b>0 = Free (white)</span><span class="light light-available"><b></b>1–<span id="gmax">${esc(s.workloadGreenMax)}</span> = Available (green)</span><span class="light light-busy"><b></b>&gt;<span id="gmax2">${esc(s.workloadGreenMax)}</span> = Busy (red)</span></div>

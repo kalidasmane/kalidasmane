@@ -7,6 +7,8 @@
     { id: 'dashboard', label: 'Dashboard', icon: 'dashboard', perm: 'dashboard' },
     { id: 'tracker', label: 'Daily Tracker', icon: 'clock', perm: 'timesheet' },
     { id: 'tickets', label: 'Tickets', icon: 'ticket', perm: 'tickets' },
+    { id: 'problems', label: 'Problems', icon: 'alert', perm: 'problems' },
+    { id: 'changes', label: 'Changes', icon: 'change', perm: 'changes' },
     { id: 'projects', label: 'Projects', icon: 'folder', perm: 'projects' },
     { id: 'devices', label: 'Devices & Remote', icon: 'monitor', perm: 'devices' },
     { id: 'reports', label: 'Reports', icon: 'chart', perm: 'reports' },
@@ -88,6 +90,7 @@
               <div class="me-drop">
                 <div class="me-head"><b>${esc(me.name)}</b><small>${esc(me.email || me.username)}</small><span class="ok">● Online</span></div>
                 <button data-act="push">${icon('bell', 16)} Notification settings</button>
+                <button data-act="theme" class="menu-theme">${icon('moon', 16)} Light / dark theme</button>
                 <button data-act="password">${icon('key', 16)} Change password</button>
                 <button data-act="logout">${icon('logout', 16)} Sign out</button>
               </div>
@@ -98,6 +101,7 @@
       </div>
     </div>`;
 
+    root.querySelector('[data-act=theme]').addEventListener('click', () => root.querySelector('#theme-btn').click());
     root.querySelector('#theme-btn').addEventListener('click', (e) => {
       applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
       e.currentTarget.innerHTML = icon(document.documentElement.dataset.theme === 'dark' ? 'sun' : 'moon');

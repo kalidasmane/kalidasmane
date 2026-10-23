@@ -3,7 +3,7 @@
   const { esc, icon } = App;
   let es = null;
   let items = [];
-  const KIND_ICON = { 'ticket.assigned': 'ticket', 'ticket.created': 'plus', 'ticket.updated': 'edit', comment: 'chat', mention: 'users', 'sla.warning': 'clock', 'sla.breached': 'clock' };
+  const KIND_ICON = { 'ticket.assigned': 'ticket', 'ticket.created': 'plus', 'ticket.updated': 'edit', comment: 'chat', mention: 'users', 'sla.warning': 'clock', 'sla.breached': 'clock', 'problem.assigned': 'alert', 'problem.updated': 'alert', 'change.assigned': 'change', 'change.approval': 'change', 'change.approved': 'change', 'change.rejected': 'change' };
 
   App.bellHtml = () => `<div class="bell" id="bell">
       <button class="icon-btn" id="bell-btn" aria-label="Notifications" title="Notifications">${icon('bell')}<span class="bell-badge" hidden></span></button>

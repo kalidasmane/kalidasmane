@@ -11,7 +11,7 @@ const DB_FILE = path.join(DATA_DIR, 'db.json');
 
 const COLLECTIONS = [
   'users', 'profiles', 'projects', 'timesheets', 'tickets', 'forms',
-  'emailAccounts', 'workflows', 'workflowLogs', 'emailLog', 'audit', 'devices', 'remoteSessions', 'notifyChannels', 'notifyLog', 'pushSubs', 'inbox',
+  'emailAccounts', 'workflows', 'workflowLogs', 'emailLog', 'audit', 'devices', 'remoteSessions', 'notifyChannels', 'notifyLog', 'pushSubs', 'inbox', 'problems', 'changes',
 ];
 
 let state = null;

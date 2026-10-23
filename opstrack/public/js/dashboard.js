@@ -30,6 +30,8 @@
     { id: 'tprio', title: 'Open tickets by priority', span: 4 },
     { id: 'workload', title: 'Team workload', span: 4 },
     { id: 'sla', title: 'SLA performance by priority', span: 12 },
+    { id: 'problems', title: 'Problems', span: 6 },
+    { id: 'changes', title: 'Changes', span: 6 },
     { id: 'recent', title: 'Latest tracker updates', span: 8 },
     { id: 'compliance', title: 'Not logged today', span: 4 },
   ];
@@ -166,6 +168,28 @@
       };
       if (body('tstatus')) barChart('tstatus', d.ticketsByStatus, { New: '#0ea5e9', Open: '#4f46e5', 'In Progress': '#f59e0b', 'On Hold': '#94a3b8' });
       if (body('tprio')) barChart('tprio', d.ticketsByPriority, Object.fromEntries(Object.entries({ Low: '#10b981', Medium: '#0ea5e9', High: '#f59e0b', Critical: '#ef4444' }).map(([p, c]) => [App.prioLabel(p), c])));
+
+      if (body('problems')) {
+        const pr = d.itsm?.problems;
+        body('problems').innerHTML = !pr ? App.empty('No access', 'Problem Management is not part of your role') : `<div class="mini-kpis">
+            <a href="#/problems"><strong>${pr.open}</strong><span>open problems</span></a>
+            <a href="#/problems" data-kedb><strong>${pr.knownErrors}</strong><span>known errors</span></a>
+            <a href="#/problems"><strong>${pr.incidentsLinked}</strong><span>open incidents linked</span></a>
+            <a href="#/problems" class="${pr.unassigned ? 'bad' : ''}"><strong>${pr.unassigned}</strong><span>without an owner</span></a></div>
+          ${pr.top.length ? `<ul class="mini-list">${pr.top.map((p) => `<li><a href="#/problems/${p.id}"><b>${esc(p.number)}</b></a><span>${esc(p.title)}</span><small class="muted">${p.incidents} incident(s)</small>${App.statusPill(p.status)}</li>`).join('')}</ul>` : ''}`;
+        body('problems').querySelector('[data-kedb]')?.addEventListener('click', () => App.setProblemFilter?.('known'));
+      }
+      if (body('changes')) {
+        const ch = d.itsm?.changes;
+        body('changes').innerHTML = !ch ? App.empty('No access', 'Change Management is not part of your role') : `<div class="mini-kpis">
+            <a href="#/changes" data-mine class="${ch.awaitingMe ? 'warn' : ''}"><strong>${ch.awaitingMe}</strong><span>awaiting my approval</span></a>
+            <a href="#/changes"><strong>${ch.awaitingApproval}</strong><span>awaiting CAB</span></a>
+            <a href="#/changes" data-sched><strong>${ch.next7}</strong><span>scheduled in 7 days</span></a>
+            <a href="#/changes" class="${ch.failed30 ? 'bad' : ''}"><strong>${ch.successRate == null ? '—' : `${ch.successRate}%`}</strong><span>successful (30 days)</span></a></div>
+          ${ch.upcoming.length ? `<ul class="mini-list">${ch.upcoming.map((c) => `<li><a href="#/changes/${c.id}"><b>${esc(c.number)}</b></a><span>${esc(c.title)}</span><small class="muted">${App.fmtDateTime(c.plannedStart)}</small>${App.statusPill(c.status)}</li>`).join('')}</ul>` : '<p class="muted">No changes coming up.</p>'}`;
+        body('changes').querySelector('[data-mine]')?.addEventListener('click', () => App.setChangeFilter?.({ view: 'list', status: 'mine' }));
+        body('changes').querySelector('[data-sched]')?.addEventListener('click', () => App.setChangeFilter?.({ view: 'schedule' }));
+      }
 
       if (body('sla')) {
         const pctCell = (v) => (v == null ? '<span class="muted">—</span>' : `<span class="pct ${v >= 90 ? 'good' : v >= 75 ? 'warn' : 'bad'}">${v}%</span>`);
