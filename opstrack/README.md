@@ -27,6 +27,9 @@ A self-hosted web application for engineering and support teams that combines:
   engineer and activity.
 - **Reports** – Project × Engineer effort summary and detailed log, CSV export.
 - **Team** – directory and reporting-manager org chart.
+- **Push notifications** – browser and phone alerts (Chrome, Edge, Firefox, Safari, Android,
+  iPhone) for tickets assigned to you, changes and comments on your tickets, and new tickets.
+  Each person chooses what they receive. See [Push notifications](#push-notifications).
 - **Email notifications for ticket updates** – requesters hear about status changes and replies,
   engineers about changes and comments by others, and CC addresses on a ticket get updates too. See
   [Email notifications](#email-notifications-for-ticket-updates).
@@ -186,6 +189,39 @@ Put it behind HTTPS (nginx, Caddy, IIS, or your cloud's load balancer).
 | `DATABASE_URL` | – | PostgreSQL connection string. When set, data is stored there instead of `DATA_DIR` |
 | `DATABASE_SSL_VERIFY` | `true` | Set to `false` if the database uses a certificate Node.js can't verify |
 | `TRUST_PROXY` | `1` | Number of reverse proxies in front of the app; set to `0` when exposed directly |
+| `HTTPS_PROXY` | – | Outbound proxy for push notifications (e.g. `http://proxy.corp:8080`) |
+
+## Push notifications
+
+Engineers get alerts on their computer or phone, even when OpsTrack isn't open, using the
+standard Web Push built into browsers. No app store app and no third-party account is needed. The
+server creates its signing keys (VAPID) on first start and keeps them out of the settings that
+browsers can see.
+
+**To turn it on (each person, on each device):** user menu (top right) → **Push notifications** →
+**Turn on for this device** → allow notifications. **Send a test** checks it works.
+
+| Device | How |
+|--------|-----|
+| Windows / macOS / Linux | Chrome, Edge, Firefox or Safari 16+, while the browser is running |
+| Android | Chrome or Firefox |
+| iPhone / iPad (iOS 16.4+) | Open OpsTrack in Safari, tap **Share → Add to Home Screen**, open it from the new icon, then turn on push |
+
+**Each person chooses what they get:** a ticket assigned to them, someone else changing or
+commenting on their ticket (including requester email replies), and new tickets. People who can see
+all tickets choose *none*, *Critical only*, *High and Critical* or *all* new tickets. Clicking an alert
+opens the ticket. Critical alerts stay on screen until dismissed. Nobody is alerted about their own
+changes.
+
+**Requirements**
+- OpsTrack must be served over **HTTPS**. Render and the installer in `deploy/` already do this.
+  `http://localhost` also works for testing.
+- The server must be able to reach the browsers' push services: `fcm.googleapis.com` and `*.google.com`
+  (Chrome, Edge, Android), `*.push.services.mozilla.com` (Firefox), `*.push.apple.com` (Safari) and
+  `*.notify.windows.com`. Only these hosts are accepted as subscription endpoints. If outbound traffic goes
+  through a proxy, set `HTTPS_PROXY`.
+- Devices whose subscription has expired (the push service answers 404/410) are removed automatically.
+  Failed sends appear in the Notifications delivery log as "Browser push".
 
 ## Email notifications for ticket updates
 
@@ -348,6 +384,8 @@ lib/auth.js          password hashing (scrypt), sessions, presence, permissions
 lib/seed.js          default profiles, admin user, settings, sample form
 lib/tickets.js       ticket service, workload calculation, notifications
 lib/workflow.js      workflow engine + scheduler
+lib/push.js          browser push notifications (Web Push / VAPID)
+public/sw.js         service worker that shows push notifications
 lib/ticketmail.js    email notifications for ticket updates and comments
 lib/notify.js        Teams, Slack, WhatsApp (Meta / Twilio) and SMS (Twilio / Vonage / HTTP) notifications
 lib/remote.js        remote desktop links (MeshCentral / Guacamole / custom) and session logging

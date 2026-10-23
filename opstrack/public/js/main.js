@@ -86,6 +86,7 @@
               <button class="me-btn">${App.avatar({ ...me, online: true }, 34)}<span class="me-name"><b>${esc(me.name)}</b><small>${esc(me.profileName)}</small></span></button>
               <div class="me-drop">
                 <div class="me-head"><b>${esc(me.name)}</b><small>${esc(me.email || me.username)}</small><span class="ok">● Online</span></div>
+                <button data-act="push">${icon('chat', 16)} Push notifications</button>
                 <button data-act="password">${icon('key', 16)} Change password</button>
                 <button data-act="logout">${icon('logout', 16)} Sign out</button>
               </div>
@@ -112,6 +113,7 @@
       App.showLogin();
     });
     meMenu.querySelector('[data-act=password]').addEventListener('click', () => { meMenu.classList.remove('open'); changePassword(); });
+    meMenu.querySelector('[data-act=push]').addEventListener('click', () => { meMenu.classList.remove('open'); App.openPushSettings().catch(App.fail); });
   }
 
   function changePassword(forced = false) {
@@ -175,6 +177,7 @@
       await App.refreshMeta();
       shell();
       startHeartbeat();
+      App.registerServiceWorker();
       if (!location.hash) location.hash = '#/dashboard';
       await render();
       if (me.mustChangePassword) changePassword(true);
