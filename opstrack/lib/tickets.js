@@ -86,7 +86,7 @@ function create(data, actor, { source = 'web', skipWorkflows = false } = {}) {
   setImmediate(() => {
     creating.delete(t.id);
     require('./notify').ticketEvent('ticket.created', t);
-    require('./push').ticketCreated(t, actor);
+    require('./alerts').ticketCreated(t, actor);
   });
   if (settings().notifyRequesterOnCreate && t.requesterEmail && source !== 'web') {
     require('./email').sendMail({
@@ -128,13 +128,13 @@ function update(t, patch, actor, { skipWorkflows = false, quietEmail = false } =
   addHistory(t, changes.join(' · '), actor);
   if (!quietEmail) {
     require('./ticketmail').onUpdate(t, before, changes, actor);
-    require('./push').ticketUpdated(t, before, changes, actor);
+    require('./alerts').ticketUpdated(t, before, changes, actor);
   }
   if (before.assigneeId !== t.assigneeId) {
     notifyAssignee(t);
     if (t.assigneeId && !creating.has(t.id)) {
       require('./notify').ticketEvent('ticket.assigned', t);
-      require('./push').ticketAssigned(t, actor);
+      require('./alerts').ticketAssigned(t, actor);
     }
   }
   if (!skipWorkflows) require('./workflow').run('ticket.updated', t, { actor, before });
@@ -152,7 +152,7 @@ function addComment(t, text, actor, { internal = false, fromEmail = null, emailN
   t.updatedAt = db.now();
   db.save();
   require('./ticketmail').onComment(t, comment, actor, fromEmail, emailNote);
-  require('./push').ticketCommented(t, comment, actor);
+  require('./alerts').ticketCommented(t, comment, actor);
 }
 
 // Inbound email: a reply with [INC-1234] in the subject becomes a comment,

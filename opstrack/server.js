@@ -10,6 +10,8 @@ const email = require('./lib/email');
 const remote = require('./lib/remote');
 const notify = require('./lib/notify');
 const push = require('./lib/push');
+const alerts = require('./lib/alerts');
+const inbox = require('./lib/inbox');
 
 const app = express();
 app.disable('x-powered-by');
@@ -155,7 +157,7 @@ app.put('/api/users/:id', requireAuth, requirePerm('users', 'edit'), (req, res) 
   }
   if (b.password) { patch.passwordHash = auth.hashPassword(b.password); patch.mustChangePassword = !!b.mustChangePassword; }
   db.update('users', u.id, patch);
-  if (patch.active === false) auth.destroyUserSessions(u.id);
+  if (patch.active === false) { auth.destroyUserSessions(u.id); inbox.disconnectUser(u.id); }
   db.log('audit', { userId: req.user.id, action: 'user.update', target: u.username });
   res.json(publicUser(u));
 });
@@ -172,6 +174,8 @@ app.delete('/api/users/:id', requireAuth, requirePerm('users', 'delete'), (req, 
   for (const t of db.all('tickets')) if (t.assigneeId === u.id && !tickets.isClosed(t)) t.assigneeId = null;
   auth.destroyUserSessions(u.id);
   for (const x of db.where('pushSubs', (p) => p.userId === u.id)) db.remove('pushSubs', x.id);
+  db.state.inbox = db.all('inbox').filter((n) => n.userId !== u.id);
+  inbox.disconnectUser(u.id);
   db.remove('users', u.id);
   db.log('audit', { userId: req.user.id, action: 'user.delete', target: u.username });
   res.json({ ok: true });
@@ -659,10 +663,20 @@ app.post('/api/email-accounts/:id/send-test', requireAuth, requirePerm('email', 
   bad(res, `Send failed: ${last?.detail || 'unknown error'}`);
 });
 
+// ---------- in-app notifications (bell) ----------
+app.get('/api/notifications', requireAuth, (req, res) => {
+  res.json({ items: inbox.list(req.user.id, Math.min(100, Number(req.query.limit) || 50)), unread: inbox.unreadCount(req.user.id) });
+});
+app.get('/api/notifications/stream', requireAuth, inbox.stream);
+app.post('/api/notifications/read', requireAuth, (req, res) => {
+  const ids = req.body?.all === true ? 'all' : (Array.isArray(req.body?.ids) ? req.body.ids.map(String) : []);
+  res.json({ unread: inbox.markRead(req.user.id, ids) });
+});
+
 // ---------- browser push notifications ----------
 app.get('/api/push', requireAuth, (req, res) => {
   res.json({
-    publicKey: push.publicKey(), prefs: push.prefsFor(req.user),
+    publicKey: push.publicKey(), prefs: alerts.prefsFor(req.user),
     devices: db.where('pushSubs', (x) => x.userId === req.user.id).map((x) => ({ endpoint: x.endpoint, userAgent: x.userAgent, createdAt: x.createdAt, lastUsedAt: x.lastUsedAt })),
   });
 });
@@ -677,8 +691,8 @@ app.post('/api/push/unsubscribe', requireAuth, (req, res) => {
 });
 app.put('/api/push/prefs', requireAuth, (req, res) => {
   const b = req.body || {};
-  const p = push.prefsFor(req.user);
-  for (const k of ['assigned', 'updates', 'comments']) if (k in b) p[k] = b[k] === true;
+  const p = alerts.prefsFor(req.user);
+  for (const k of ['assigned', 'updates', 'comments', 'mentions']) if (k in b) p[k] = b[k] === true;
   if (['none', 'critical', 'high', 'all'].includes(b.newTickets)) p.newTickets = b.newTickets;
   db.update('users', req.user.id, { pushPrefs: p });
   res.json(p);

@@ -126,7 +126,7 @@
               <div class="tl-dot"></div><div class="tl-body"><div class="tl-meta"><b>${esc(c.authorName)}</b>${c.internal && !c.system ? '<span class="tag ghost">internal note</span>' : ''}<small class="muted">${App.fmtDateTime(c.at)}</small></div>
               <div>${esc(c.text).replace(/\n/g, '<br>')}</div></div></li>`).join('')}</ul>
             <form id="comment" class="comment-box">
-              <textarea name="text" rows="3" placeholder="Write a reply or an internal note…" required></textarea>
+              <textarea name="text" rows="3" placeholder="Write a reply or an internal note… Type @username to notify a colleague." required></textarea>
               <div class="row"><label class="check"><input type="checkbox" name="internal" checked> Internal note (not emailed to requester)</label><span class="grow"></span><button class="btn primary sm" type="submit">Post</button></div>
             </form>
           </section>
